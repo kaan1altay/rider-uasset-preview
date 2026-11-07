@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — Maps and widget designs (2026-11-07)
+
+- Added `.umap` editor tabs and native two-way VCS diffs, saved persistent-level mesh previews, actor/component hierarchy and Details.
+- Added Widget Blueprint design rendering, widget hierarchy, Layout slot Details and visual/text/layout comparisons.
+- Isolated ordinary map/widget previews from live unsaved packages, preserving the active editor level.
+- Added partial-hierarchy handling so omitted actors are not mistaken for removals.
+- Excluded transient world helper actors from saved-map comparisons, avoiding false additions/removals on each load.
+- Applied Unreal's transform rules for sockets and absolute channels; added world subsystem teardown before revision GC.
+- Bounded nested widget template expansion and documented design-time callback behavior.
+- Added real map/widget automation fixtures and cross-layer comparison checks.
+
 ## 0.2.1 — Rider compatibility (2026-11-07)
 
 - Extended declared Rider compatibility through build 262 (2026.2).

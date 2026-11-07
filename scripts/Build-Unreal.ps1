@@ -47,7 +47,8 @@ $projectData = @{
 } | ConvertTo-Json -Depth 5
 if (!$HostProject) { [IO.File]::WriteAllText($projectFile, $projectData, [Text.UTF8Encoding]::new($false)) }
 $pluginFile = Join-Path $pluginCopy 'RiderAssetPreview.uplugin'
-& $buildCommand 'UnrealEditor' 'Win64' 'Development' "-Project=$projectFile" "-Plugin=$pluginFile" '-NoEngineChanges' '-NoHotReloadFromIDE' '-NoUBA' "-MaxParallelActions=$MaxParallelActions"
+# Re-scan copied sources, including new test .cpp files in a reused host.
+& $buildCommand 'UnrealEditor' 'Win64' 'Development' "-Project=$projectFile" "-Plugin=$pluginFile" '-NoEngineChanges' '-NoHotReloadFromIDE' '-NoUBTMakefiles' '-NoUBA' "-MaxParallelActions=$MaxParallelActions"
 if ($LASTEXITCODE -ne 0) { throw "Unreal plugin build failed (exit $LASTEXITCODE). See the UBT log; no automatic retry was made." }
 $packageRoot = Join-Path $taskRoot ('dist\RiderAssetPreview-UE5.8-' + $stamp)
 New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null

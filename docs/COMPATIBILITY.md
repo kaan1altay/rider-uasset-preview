@@ -8,6 +8,8 @@ Version 0.2.1 declares `253` through `262.*`. It keeps Java 21 bytecode and is b
 
 ## Updating from 0.2.0
 
+For map and Widget Blueprint support in 0.3.0, update **both** the Rider plugin and the Unreal companion. The 0.2.x companion does not implement these previews. The Rider build range remains 253–262.*.
+
 1. In the existing Rider version, update **Unreal Asset Preview** to **0.2.1** from the custom repository, or install the Rider ZIP from the release using **Install Plugin from Disk**.
 2. Restart Rider if requested. Reopen the IDE update dialog so it can check the newly installed plugin metadata.
 3. Proceed with the Rider upgrade. If Rider has already been updated and disabled 0.2.0, install 0.2.1 in the new IDE and restart it.

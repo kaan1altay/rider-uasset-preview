@@ -50,6 +50,16 @@ Review data flow, identity rules and comparison boundaries are documented in [AS
 
 ## Isolated interactive demo
 
+For maps and Widget Blueprints, run these before launching an Editor host:
+
+```powershell
+.\scripts\Test-Spatial.ps1 -HostProject $hostProject -AllowOtherProjects
+.\scripts\Build-Rider.ps1 -Test -SpatialEvidence '.\build\spatial-<timestamp>'
+.\scripts\Start-SpatialDemo.ps1 -HostProject $hostProject
+```
+
+The spatial demo commits only the generated before fixtures in the disposable, no-remote host repository and restores their after versions. In Commit, open `Map_Review` or `WBP_Review`. It refuses unrecognized repositories, staged changes or modified fixture bytes. It can coexist with the original Blueprint demo fixture. New generated spatial fixtures require a fresh host after a spatial demo has been prepared.
+
 After both plugins are built:
 
 ```powershell
@@ -79,6 +89,8 @@ The stop script verifies the saved host's PID, process start time and project pa
 
 ## Verification status
 
+Version 0.3.0 adds 13 Rider diff-adapter checks and 44 comparison checks, alongside the existing 55 transport checks and 33 distribution checks. Seven cross-layer assertions use real Unreal map/widget exports to verify actor additions/movement, stable widget identities, text and canvas-slot movement. The native spatial fixture passes with zero automation warnings, including absolute child transforms, ordinary-preview isolation, unchanged active world, skipped Blueprint PreConstruct and GC of closed map/widget packages. Transient world helper actors are excluded from comparison. The existing Blueprint revision fixture and four asset-type smoke tests also pass.
+
 For the 0.2.1 compatibility hotfix, the exact release ZIP passes JetBrains Plugin Verifier 1.411 on Rider 2025.3.5.3 (253.33813.106) and 2026.2.4.1 (262.11879.119), with `Compatible` verdicts and no API warnings. The Java tests also pass when compiled and run against 2026.2.4.1. Distribution checks increase to 33, including accepted 2026.x branches, old/future build rejection and inconsistent manifest/ZIP bounds. See [COMPATIBILITY.md](COMPATIBILITY.md) for reproduction and upgrade steps.
 
 Version 0.2.0 passes 55 HTTP transport checks, 42 comparison/LFS/image checks, ten checks using Rider's actual diff request types and packaged extension registration, and 27 distribution checks. Loading the real native before/after fixture into the Java comparison model adds four cross-layer assertions: one added component, the Body scale change, one changed logic node and no false component removal. The Unreal Windows build and revision automation fixture pass, including independent historical defaults, shared-camera PNGs and GC reclamation of a closed revision package. Real offscreen Unreal smoke tests also pass for Static Mesh, Skeletal Mesh, Texture2D and Actor Blueprint.
@@ -97,8 +109,8 @@ After building both plugins, pass the compiled Unreal package printed by `Build-
 
 This verifies that the compiled Unreal package contains the current plugin source, then produces:
 
-- `dist/unreal-asset-preview-0.2.1.zip`
-- `dist/RiderAssetPreview-UE5.8-0.2.1.zip`
+- `dist/unreal-asset-preview-0.3.0.zip`
+- `dist/RiderAssetPreview-UE5.8-0.3.0.zip`
 - `dist/release-manifest.json` with SHA-256 hashes and sizes.
 - `dist/updatePlugins.xml` for Rider's custom plugin repository.
 - `dist/Install.ps1` for single-command installation.

@@ -88,6 +88,10 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
     private List<Inspection.Row> shownRows = List.of();
     private String selectedKey, focusKey = "asset";
     private double yaw = 40, pitch = 20, zoom = 1;
+    private boolean orbit = true;
+    private final JLabel cameraLabel = new JLabel("Linked camera");
+    private final JButton frame = new JButton("Frame asset"),
+            selected = new JButton("Frame selection");
     private final String beforeTitle, afterTitle;
 
     AssetDiffViewer(Project project, ContentDiffRequest request) {
@@ -161,8 +165,7 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
         JPanel visualTools = new JPanel(new BorderLayout());
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEADING, 6, 0));
         controls.add(mode);
-        controls.add(new JLabel("Linked camera"));
-        JButton frame = new JButton("Frame asset"), selected = new JButton("Frame selection");
+        controls.add(cameraLabel);
         controls.add(frame);
         controls.add(selected);
         visualTools.add(controls, BorderLayout.WEST);
@@ -432,13 +435,19 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
                     refresh.setEnabled(true);
                     copy.setEnabled(true);
                     Inspection.Snapshot shown = after == null ? before : after;
+                    orbit =
+                            !shown.type().equals("WidgetBlueprint")
+                                    && !shown.type().equals("Texture2D");
+                    cameraLabel.setVisible(orbit);
+                    frame.setVisible(orbit);
+                    selected.setVisible(orbit);
                     summary.setText(
                             result.settings()
                                     + " settings differ   ·   +"
                                     + result.added()
                                     + " / −"
                                     + result.removed()
-                                    + " components   ·   "
+                                    + " objects   ·   "
                                     + result.logic()
                                     + (result.logic() == 1 ? " logic node" : " logic nodes"));
                     context.setText(
@@ -450,7 +459,9 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
                                             ? "Asset added"
                                             : after == null ? "Asset removed" : "Before → After"));
                     scope.setText(
-                            AssetKnowledge.asset(shown.type())
+                            (shown.type().equals("World") || shown.type().equals("WidgetBlueprint")
+                                            ? shown.notice()
+                                            : AssetKnowledge.asset(shown.type()))
                                     + "\n"
                                     + (result.limited()
                                             ? "Some fields or long descriptions are shortened or"
@@ -460,7 +471,11 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
                                     + " Dependencies use the open project’s current versions; mesh"
                                     + " geometry and texture pixels are not a semantic diff.");
                     status.setText(
-                            "Compared locally · Drag to orbit · Scroll to zoom · F7 for next row");
+                            orbit
+                                    ? "Compared locally · Drag to orbit · Scroll to zoom · F7 for"
+                                          + " next row"
+                                    : "Compared locally · Use Wipe or Difference to compare pixels"
+                                          + " · F7 for next row");
                     tree.setEnabled(true);
                     canvas.message = "";
                     focusKey = "asset";
@@ -603,8 +618,11 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
                         canvas.message = "";
                         canvas.repaint();
                         status.setText(
-                                "Compared locally · Drag to orbit · Scroll to zoom · F7 for next"
-                                        + " row");
+                                orbit
+                                        ? "Compared locally · Drag to orbit · Scroll to zoom · F7"
+                                              + " for next row"
+                                        : "Compared locally · Use Wipe or Difference to compare"
+                                              + " pixels · F7 for next row");
                     }
                 });
             } catch (Exception error) {
@@ -761,7 +779,7 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
                             if (mode.getSelectedIndex() == 1 && e.isShiftDown()) {
                                 wipePosition.setValue(
                                         (int) (100.0 * e.getX() / Math.max(1, getWidth())));
-                            } else {
+                            } else if (orbit) {
                                 yaw -= (e.getX() - last.x) * .5;
                                 pitch =
                                         Math.max(
@@ -774,6 +792,7 @@ final class AssetDiffViewer implements FrameDiffTool.DiffViewer {
 
                         @Override
                         public void mouseWheelMoved(MouseWheelEvent e) {
+                            if (!orbit) return;
                             zoom =
                                     Math.max(
                                             .08,

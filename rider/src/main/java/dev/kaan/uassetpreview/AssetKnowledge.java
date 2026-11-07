@@ -9,7 +9,7 @@ final class AssetKnowledge {
                     Map.entry(
                             "RelativeLocation",
                             "Position relative to the parent component, measured in centimeters."
-                                + " Moving a parent also moves its attached children."),
+                                    + " Moving a parent also moves its attached children."),
                     Map.entry(
                             "RelativeRotation",
                             "Orientation relative to the parent, measured in degrees. Pitch tilts"
@@ -17,103 +17,111 @@ final class AssetKnowledge {
                     Map.entry(
                             "RelativeScale3D",
                             "Size multiplier on each axis. A value of 1 keeps the original size; 2"
-                                + " doubles it. Scale also affects attached children."),
+                                    + " doubles it. Scale also affects attached children."),
                     Map.entry(
                             "StaticMesh",
                             "The 3D shape used by this component. Its material controls the surface"
-                                + " appearance separately."),
+                                    + " appearance separately."),
                     Map.entry(
                             "SkeletalMesh",
                             "A 3D shape with a skeleton for animation. This preview shows its"
-                                + " reference pose."),
+                                    + " reference pose."),
                     Map.entry(
                             "OverrideMaterials",
                             "The material assigned to a surface slot. Materials control the surface"
-                                + " appearance, such as color, roughness and transparency."),
+                                    + " appearance, such as color, roughness and transparency."),
                     Map.entry(
                             "Mobility",
                             "Whether Unreal treats this component as fixed, partly dynamic, or"
-                                + " movable during gameplay. This can affect lighting and"
-                                + " performance."),
+                                    + " movable during gameplay. This can affect lighting and"
+                                    + " performance."),
                     Map.entry(
                             "CollisionEnabled",
                             "Whether this component participates in overlap queries, physical"
-                                + " collisions, both, or neither."),
+                                    + " collisions, both, or neither."),
                     Map.entry(
                             "CollisionProfileName",
                             "A named set of collision rules describing which objects this component"
-                                + " blocks, overlaps, or ignores."),
+                                    + " blocks, overlaps, or ignores."),
                     Map.entry(
                             "bGenerateOverlapEvents",
                             "Whether this component can report overlap events when objects enter or"
-                                + " leave its collision shape."),
+                                    + " leave its collision shape."),
                     Map.entry(
                             "bSimulatePhysics",
                             "Whether Unreal's physics simulation can control this component."
-                                + " Physics is not simulated in this preview."),
+                                    + " Physics is not simulated in this preview."),
                     Map.entry(
                             "bEnableGravity",
                             "Whether gravity affects this component when physics simulation is"
-                                + " active."),
+                                    + " active."),
                     Map.entry(
                             "MassInKgOverride",
                             "The mass used by physics, in kilograms, when a mass override is"
-                                + " enabled."),
+                                    + " enabled."),
                     Map.entry(
                             "MaxWalkSpeed",
                             "The movement component's maximum walking speed, in centimeters per"
-                                + " second. This setting alone does not describe every force or"
-                                + " ability affecting movement."),
+                                    + " second. This setting alone does not describe every force or"
+                                    + " ability affecting movement."),
                     Map.entry(
                             "JumpZVelocity",
                             "The upward speed applied at the start of a jump, in centimeters per"
-                                + " second. Gravity and other movement rules also affect the"
-                                + " resulting jump."),
+                                    + " second. Gravity and other movement rules also affect the"
+                                    + " resulting jump."),
                     Map.entry(
                             "AirControl",
                             "How much directional input can influence movement while falling."
-                                + " Custom movement code or abilities can change the effective"
-                                + " behavior."),
+                                    + " Custom movement code or abilities can change the effective"
+                                    + " behavior."),
                     Map.entry(
                             "GravityScale",
                             "A multiplier applied to the movement component's gravity."),
                     Map.entry(
                             "FieldOfView",
                             "The camera's field of view, in degrees. Larger values show a wider"
-                                + " view."),
+                                    + " view."),
                     Map.entry(
                             "CapsuleRadius",
                             "The radius of the capsule-shaped collision volume, in centimeters."),
                     Map.entry(
                             "CapsuleHalfHeight",
                             "Half the total height of the capsule collision volume, including its"
-                                + " rounded ends, in centimeters."),
+                                    + " rounded ends, in centimeters."),
                     Map.entry(
                             "bHiddenInGame",
                             "Whether this component is hidden during gameplay. Editor visibility"
-                                + " and gameplay visibility can differ."),
+                                    + " and gameplay visibility can differ."),
                     Map.entry(
                             "CastShadow",
                             "Whether this component casts a shadow when its rendering and lighting"
-                                + " settings allow it."));
+                                    + " settings allow it."));
 
     static String asset(String type) {
         return switch (type) {
+            case "World" ->
+                    "A level stores placed actors and their components. This review shows saved"
+                        + " persistent-level data; streamed levels and World Partition actors may"
+                        + " live in separate files.";
+            case "WidgetBlueprint" ->
+                    "A Widget Blueprint defines a user interface. The hierarchy contains controls"
+                            + " and Layout slots; the image shows the saved design, without game"
+                            + " initialization or PreConstruct.";
             case "Blueprint" ->
                     "A Blueprint defines a reusable class, its default settings and visual"
-                        + " scripting logic. Actor Blueprints can also contain components.";
+                            + " scripting logic. Actor Blueprints can also contain components.";
             case "StaticMesh" ->
                     "A Static Mesh is a reusable 3D shape, such as a wall, prop or piece of"
-                        + " scenery.";
+                            + " scenery.";
             case "SkeletalMesh" ->
                     "A Skeletal Mesh is a 3D shape with a skeleton, commonly used for animated"
-                        + " characters.";
+                            + " characters.";
             case "Texture2D" ->
                     "A Texture is an image that can provide color, surface detail or other data to"
-                        + " a material.";
+                            + " a material.";
             default ->
                     "This asset stores reusable settings or resources for the Unreal project. Its"
-                        + " editable defaults are shown below.";
+                            + " editable defaults are shown below.";
         };
     }
 

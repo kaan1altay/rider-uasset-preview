@@ -10,7 +10,7 @@ import org.jetbrains.annotations.NotNull;
 public final class AssetEditorProvider implements FileEditorProvider, DumbAware {
     @Override
     public boolean accept(@NotNull Project project, @NotNull VirtualFile file) {
-        return file.isInLocalFileSystem() && "uasset".equalsIgnoreCase(file.getExtension());
+        return file.isInLocalFileSystem() && AssetDiffTool.isPackage(file.getName());
     }
 
     @Override

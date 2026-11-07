@@ -76,6 +76,17 @@ public final class AssetDiffToolTest {
         PointerContent next = new PointerContent();
         next.putUserData(DiffUserDataKeysEx.FILE_NAME, "BP_Örnek.uasset");
         EmptyContent empty = new EmptyContent();
+        PointerContent map = new PointerContent();
+        map.putUserData(DiffUserDataKeysEx.FILE_NAME, "Level.UMAP");
+        check(
+                tool.canShow(context, new SimpleDiffRequest("Map", map, map, "Before", "After")),
+                "Map revisions not accepted");
+        check(
+                tool.canShow(
+                        context,
+                        new SimpleDiffRequest("Deleted map", map, empty, "Before", "After")),
+                "Deleted map not accepted");
+        check(!AssetDiffTool.isPackage("Level.umap.bak"), "Unrelated backup intercepted");
         check(
                 tool.canShow(
                         context,

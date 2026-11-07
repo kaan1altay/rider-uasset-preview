@@ -8,7 +8,7 @@ public class RiderAssetPreview : ModuleRules
         PCHUsage = PCHUsageMode.NoPCHs;
         PrivateDependencyModuleNames.AddRange(new[] {
             "Core", "CoreUObject", "Engine", "UnrealEd", "HTTPServer", "Json",
-            "Sockets", "RenderCore", "RHI", "ImageCore", "ImageWrapper", "PropertyEditor", "Slate", "SlateCore", "BlueprintGraph"
+            "Sockets", "RenderCore", "RHI", "ImageCore", "ImageWrapper", "PropertyEditor", "Slate", "SlateCore", "BlueprintGraph", "UMG", "UMGEditor"
         });
     }
 }

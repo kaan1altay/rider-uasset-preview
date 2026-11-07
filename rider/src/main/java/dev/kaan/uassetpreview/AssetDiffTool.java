@@ -28,7 +28,7 @@ public final class AssetDiffTool implements FrameDiffTool {
         boolean found = false;
         for (DiffContent side : content.getContents()) {
             if (side instanceof EmptyContent) continue;
-            if (!name(side).toLowerCase(Locale.ROOT).endsWith(".uasset")) return false;
+            if (!isPackage(name(side))) return false;
             if (!(side instanceof FileContent) && !(side instanceof DocumentContent)) return false;
             found = true;
         }
@@ -46,6 +46,11 @@ public final class AssetDiffTool implements FrameDiffTool {
         if (hint != null && !hint.isBlank()) return hint;
         VirtualFile file = file(side);
         return file == null ? "" : file.getName();
+    }
+
+    static boolean isPackage(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".uasset") || lower.endsWith(".umap");
     }
 
     static VirtualFile file(DiffContent side) {
@@ -76,7 +81,7 @@ public final class AssetDiffTool implements FrameDiffTool {
         if (value == null) return null;
         try {
             Path p = Path.of(value);
-            return p.isAbsolute() && value.toLowerCase(Locale.ROOT).endsWith(".uasset") ? p : null;
+            return p.isAbsolute() && isPackage(value) ? p : null;
         } catch (InvalidPathException error) {
             return null;
         }

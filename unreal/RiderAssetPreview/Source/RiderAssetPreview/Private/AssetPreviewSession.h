@@ -16,10 +16,12 @@ struct FAssetPreviewComponent
     FString Id;
     FString Parent;
     FString Name;
-    TObjectPtr<UActorComponent> Source = nullptr;
+    TObjectPtr<UObject> Source = nullptr;
     TObjectPtr<UActorComponent> Preview = nullptr;
     FName Socket = NAME_None;
     FString StableKey;
+    bool bWorldSpace = false;
+    FTransform SavedTransform = FTransform::Identity;
 };
 
 /** One isolated world per Rider tab. Never uses the user's level or runs Blueprint UCS. */
@@ -37,6 +39,7 @@ public:
     void Touch();
 #if WITH_DEV_AUTOMATION_TESTS
     UPackage* GetRevisionPackageForTesting() const { return RevisionPackage; }
+    class UUserWidget* GetWidgetForTesting() const;
 #endif
     double LastAccess = 0;
     FString Id;
@@ -46,6 +49,8 @@ public:
 
 private:
     bool OpenBlueprint(class UBlueprint* Blueprint, FString& Error);
+    bool OpenMap(class UWorld* World, FString& Error);
+    bool OpenWidget(class UWidgetBlueprint* Blueprint, FString& Error);
     void BuildPreviewComponents();
     FBox Bounds(const FString& ComponentId) const;
     TObjectPtr<UObject> Asset = nullptr;
@@ -59,4 +64,8 @@ private:
     FString Notice;
     FString OriginalPackage;
     TObjectPtr<UPackage> RevisionPackage = nullptr;
+    TUniquePtr<class FWidgetPreviewContent> Widget;
+    FString LocalSnapshotDirectory;
+    bool bMap = false;
+    bool bHierarchyLimited = false;
 };

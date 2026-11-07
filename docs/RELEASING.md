@@ -22,10 +22,10 @@ Run these in PowerShell 7 from the repository root. `Test-Distribution.ps1` uses
 
 ## Review the release
 
-For version **0.2.1**, attach all five files from `dist/` to a GitHub Release tagged **`v0.2.1`**:
+For version **0.3.0**, attach all five files from `dist/` to a GitHub Release tagged **`v0.3.0`**:
 
-- `unreal-asset-preview-0.2.1.zip`
-- `RiderAssetPreview-UE5.8-0.2.1.zip`
+- `unreal-asset-preview-0.3.0.zip`
+- `RiderAssetPreview-UE5.8-0.3.0.zip`
 - `release-manifest.json`
 - `updatePlugins.xml`
 - `Install.ps1`
@@ -34,7 +34,7 @@ Create a draft in the repository's **Releases → Draft a new release** page, ch
 
 The release manifest contains exact Unreal version/build compatibility and the size/SHA-256 of each ZIP. Hashes detect incomplete or mismatched downloads; they are not a separate code-signing mechanism.
 
-The installer resolves `latest` once through the GitHub Releases API, then downloads everything from that fixed tag. Explicit `-Version '0.2.1'` selects `v0.2.1`. ZIP URLs inside `updatePlugins.xml` also use an immutable version tag; do not replace published release assets with unrelated builds under the same version.
+The installer resolves `latest` once through the GitHub Releases API, then downloads everything from that fixed tag. Explicit `-Version '0.3.0'` selects `v0.3.0`. ZIP URLs inside `updatePlugins.xml` also use an immutable version tag; do not replace published release assets with unrelated builds under the same version.
 
 ## After publication
 

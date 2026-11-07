@@ -54,6 +54,19 @@ public final class InspectionTest {
                         .equals("No additional pin/default lines"),
                 "Removed connection summary was misleading");
         JsonObject a = fixture("(X=1,Y=1,Z=1)"), b = fixture("(X=2,Y=1,Z=1)");
+        JsonObject clipped = a.deepCopy();
+        clipped.getAsJsonArray("components").remove(0);
+        clipped.addProperty("hierarchyTruncated", true);
+        check(
+                Inspection.compare(Inspection.Snapshot.read(a), Inspection.Snapshot.read(clipped))
+                                .removed()
+                        == 0,
+                "Clipped hierarchy invented a removal");
+        check(
+                Inspection.compare(Inspection.Snapshot.read(clipped), Inspection.Snapshot.read(a))
+                                .added()
+                        == 0,
+                "Clipped hierarchy invented an addition");
         Inspection.Review review =
                 Inspection.compare(Inspection.Snapshot.read(a), Inspection.Snapshot.read(b));
         check(review.settings() == 1, "Scale change not detected");

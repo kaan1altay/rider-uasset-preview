@@ -1,12 +1,12 @@
 <idea-plugin>
   <id>dev.kaan.uassetpreview</id>
   <name>Unreal Asset Preview</name>
-  <version>0.2.1</version>
+  <version>0.3.0</version>
   <vendor>Kaan</vendor>
   <description><![CDATA[
     Local, read-only Unreal asset reviews: linked revision viewports, component and settings differences, Blueprint pin changes and readable explanations.
     Requires the companion RiderAssetPreview plugin in an open Unreal Editor project.
-    Supports Rider's two-way Commit/Git History diffs, Actor Blueprint defaults, static meshes, skeletal meshes, Texture2D and property inspection for other assets. Dependencies come from the open project's current versions.
+    Supports Rider's two-way Commit/Git History diffs, saved .umap persistent levels, Widget Blueprint designs, Actor Blueprint defaults, static meshes, skeletal meshes, Texture2D and property inspection for other assets. Dependencies come from the open project's current versions.
   ]]></description>
   <idea-version since-build="253" until-build="262.*"/>
   <depends>com.intellij.modules.rider</depends>

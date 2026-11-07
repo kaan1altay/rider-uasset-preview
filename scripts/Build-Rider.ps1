@@ -2,6 +2,7 @@
 param(
     [string]$RiderHome = "$env:LOCALAPPDATA\Programs\Rider",
     [string]$ReviewEvidence,
+    [string]$SpatialEvidence,
     [switch]$Test
 )
 $ErrorActionPreference = 'Stop'
@@ -83,4 +84,7 @@ if ($Test) {
         Invoke-PluginJavaTest 'dev.kaan.uassetpreview.InspectionTest' @((Join-Path $ReviewEvidence 'before.json'), (Join-Path $ReviewEvidence 'after.json'))
     }
     Invoke-PluginJavaTest 'dev.kaan.uassetpreview.AssetDiffToolTest'
+    if ($SpatialEvidence) {
+        Invoke-PluginJavaTest 'dev.kaan.uassetpreview.SpatialInspectionTest' @($SpatialEvidence)
+    }
 }

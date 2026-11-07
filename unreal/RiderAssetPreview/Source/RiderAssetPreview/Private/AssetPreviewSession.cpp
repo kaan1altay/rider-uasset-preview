@@ -1,4 +1,7 @@
 #include "AssetPreviewSession.h"
+#include "WidgetPreviewContent.h"
+#include "WidgetBlueprint.h"
+#include "Engine/World.h"
 
 #include "Components/ActorComponent.h"
 #include "Components/ChildActorComponent.h"
@@ -60,6 +63,7 @@ FAssetPreviewSession::FAssetPreviewSession()
 
 FAssetPreviewSession::~FAssetPreviewSession()
 {
+    Widget.Reset();
     // Preview world owns all the actor/components. Release render state before destroying it.
     if (Capture) Capture->UnregisterComponent();
     if (Host && Scene) Scene->GetWorld()->DestroyActor(Host);
@@ -72,6 +76,10 @@ FAssetPreviewSession::~FAssetPreviewSession()
     RevisionPackage = nullptr;
     if (OwnedPackage && OwnedPackage->HasAnyPackageFlags(PKG_ForDiffing) && FPackageName::IsTempPackage(OwnedPackage->GetName()))
     {
+        // Revision loading can initialize world subsystems even without gameplay.
+        // Balance that initialization before GC releases the isolated map exports.
+        if (UWorld* OwnedWorld = UWorld::FindWorldInPackage(OwnedPackage))
+            OwnedWorld->DestroyWorld(false);
         FlushRenderingCommands();
         ResetLoaders(OwnedPackage);
         TArray<UObject*> Objects;
@@ -93,9 +101,15 @@ FAssetPreviewSession::~FAssetPreviewSession()
         OwnedPackage->ClearFlags(RF_Standalone);
         OwnedPackage->SetFlags(RF_Transient);
     }
+    if (!LocalSnapshotDirectory.IsEmpty())
+        IFileManager::Get().DeleteDirectory(*LocalSnapshotDirectory, false, true);
 }
 
 void FAssetPreviewSession::Touch() { LastAccess = FPlatformTime::Seconds(); }
+
+#if WITH_DEV_AUTOMATION_TESTS
+UUserWidget* FAssetPreviewSession::GetWidgetForTesting() const { return Widget ? Widget->GetInstance() : nullptr; }
+#endif
 
 void FAssetPreviewSession::AddReferencedObjects(FReferenceCollector& Collector)
 {
@@ -105,6 +119,7 @@ void FAssetPreviewSession::AddReferencedObjects(FReferenceCollector& Collector)
     Collector.AddReferencedObject(Capture);
     Collector.AddReferencedObject(RenderTarget);
     Collector.AddReferencedObject(RevisionPackage);
+    if (Widget) Widget->AddReferencedObjects(Collector);
     for (FAssetPreviewComponent& Component : Components)
     {
         Collector.AddReferencedObject(Component.Source);
@@ -116,32 +131,45 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error, const F
 {
     check(IsInGameThread());
     FString LongPackage;
-    if (Filename.Len() > 4096 || !FPaths::GetExtension(Filename).Equals(TEXT("uasset"), ESearchCase::IgnoreCase)
+    const FString Extension = FPaths::GetExtension(Filename).ToLower();
+    if (Filename.Len() > 4096 || (Extension != TEXT("uasset") && Extension != TEXT("umap"))
         || (Snapshot.IsEmpty() && !FPaths::FileExists(Filename))
         || !FPackageName::TryConvertFilenameToLongPackageName(Filename, LongPackage)
         || !FPackageName::IsValidLongPackageName(LongPackage))
     {
-        Error = TEXT("Select an existing .uasset inside this project's registered Content mounts.");
+        Error = TEXT("Select an existing .uasset or .umap inside this project's registered Content mounts.");
         return false;
     }
     OriginalPackage = LongPackage;
+    FString RevisionFile = Snapshot;
+    if (Extension == TEXT("umap") && RevisionFile.IsEmpty())
+    {
+        // Stage saved bytes rather than exposing the user's live editor UWorld.
+        if (IFileManager::Get().FileSize(*Filename) <= 0 || IFileManager::Get().FileSize(*Filename) > 128ll * 1024 * 1024)
+        { Error = TEXT("Map previews are limited to 128 MB saved packages."); return false; }
+        LocalSnapshotDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("RiderAssetPreview/Diff/") / FGuid::NewGuid().ToString(EGuidFormats::Digits));
+        IFileManager::Get().MakeDirectory(*LocalSnapshotDirectory, true);
+        RevisionFile = LocalSnapshotDirectory / FPaths::GetCleanFilename(Filename);
+        if (IFileManager::Get().Copy(*RevisionFile, *Filename, false) != COPY_OK)
+        { Error = TEXT("Could not stage the saved map for isolated preview."); return false; }
+    }
     UPackage* Package = nullptr;
-    if (Snapshot.IsEmpty()) Package = LoadPackage(nullptr, *LongPackage, LOAD_None);
+    if (RevisionFile.IsEmpty()) Package = LoadPackage(nullptr, *LongPackage, LOAD_None);
     else
     {
         // Use Unreal's own revision loader: PKG_ForDiffing and an instancing context
         // keep old generated classes separate from the project's live package.
         const FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("RiderAssetPreview/Diff/"));
-        FString Full = FPaths::ConvertRelativePathToFull(Snapshot);
+        FString Full = FPaths::ConvertRelativePathToFull(RevisionFile);
         FPaths::NormalizeFilename(Full);
         FString NormalizedRoot = Root;
         FPaths::NormalizeDirectoryName(NormalizedRoot);
         NormalizedRoot += TEXT("/");
         if (!Full.StartsWith(NormalizedRoot, ESearchCase::IgnoreCase) || Full.Contains(TEXT("/../"))
-            || !FPaths::GetExtension(Full).Equals(TEXT("uasset"), ESearchCase::IgnoreCase)
+            || !FPaths::GetExtension(Full).Equals(Extension, ESearchCase::IgnoreCase)
             || IFileManager::Get().FileSize(*Full) <= 0 || IFileManager::Get().FileSize(*Full) > 128ll * 1024 * 1024)
         {
-            Error = TEXT("Revision snapshots must be .uasset files below this project's Saved/RiderAssetPreview/Diff folder (128 MB maximum).");
+            Error = TEXT("Revision snapshots must match the original package extension and be below this project's Saved/RiderAssetPreview/Diff folder (128 MB maximum).");
             return false;
         }
         Package = DiffUtils::LoadPackageForDiff(FPackagePath::FromLocalPath(Full), FPackagePath::FromLocalPath(Filename));
@@ -160,6 +188,21 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error, const F
         return false;
     }
 
+    if (UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Asset))
+    {
+        if (Snapshot.IsEmpty())
+        {
+            if (IFileManager::Get().FileSize(*Filename) <= 0 || IFileManager::Get().FileSize(*Filename) > 128ll * 1024 * 1024)
+            { Error = TEXT("Widget previews are limited to 128 MB saved packages."); return false; }
+            LocalSnapshotDirectory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("RiderAssetPreview/Diff/") / FGuid::NewGuid().ToString(EGuidFormats::Digits));
+            IFileManager::Get().MakeDirectory(*LocalSnapshotDirectory, true);
+            const FString Copy = LocalSnapshotDirectory / FPaths::GetCleanFilename(Filename);
+            if (IFileManager::Get().Copy(*Copy, *Filename, false) != COPY_OK)
+            { Error = TEXT("Could not stage the saved widget design."); return false; }
+            return Open(Filename, Error, Copy);
+        }
+        return OpenWidget(WidgetBlueprint, Error);
+    }
     if (UTexture2D* Texture = Cast<UTexture2D>(Asset))
     {
         FImage Image;
@@ -188,7 +231,11 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error, const F
         return true;
     }
 
-    if (UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
+    if (UWorld* World = Cast<UWorld>(Asset))
+    {
+        if (!OpenMap(World, Error)) return false;
+    }
+    else if (UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
     {
         if (!OpenBlueprint(Blueprint, Error)) return false;
     }
@@ -235,6 +282,11 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error, const F
         return false;
     }
     BuildPreviewComponents();
+    if (bMap && !Components.ContainsByPredicate([](const FAssetPreviewComponent& Item) { return Cast<UPrimitiveComponent>(Item.Preview) != nullptr; }))
+    {
+        Notice += TEXT(" · no supported mesh geometry in this inspected level");
+        return true;
+    }
     RenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
     RenderTarget->SetFlags(RF_Transient);
     RenderTarget->ClearColor = FLinearColor(0.035f, 0.04f, 0.05f);
@@ -342,8 +394,10 @@ void FAssetPreviewSession::BuildPreviewComponents()
     for (FAssetPreviewComponent& Component : Components)
     {
         // ChildActor registration creates another game actor. Inspect its template, but do not spawn it.
-        if (!Component.Source || Component.Source->IsA<UChildActorComponent>()) continue;
-        Component.Preview = DuplicateObject<UActorComponent>(Component.Source, Host, MakeUniqueObjectName(Host, Component.Source->GetClass()));
+        UActorComponent* SourceComponent = Cast<UActorComponent>(Component.Source);
+        if (!SourceComponent || SourceComponent->IsA<UChildActorComponent>()) continue;
+        if (bMap && !SourceComponent->IsA<UStaticMeshComponent>() && !SourceComponent->IsA<USkeletalMeshComponent>()) continue;
+        Component.Preview = DuplicateObject<UActorComponent>(SourceComponent, Host, MakeUniqueObjectName(Host, SourceComponent->GetClass()));
         Component.Preview->ClearFlags(RF_ArchetypeObject | RF_DefaultSubObject | RF_Public | RF_Standalone | RF_Transactional);
         Component.Preview->SetFlags(RF_Transient);
         Component.Preview->CreationMethod = EComponentCreationMethod::Instance;
@@ -352,7 +406,7 @@ void FAssetPreviewSession::BuildPreviewComponents()
         if (USceneComponent* SceneComponent = Cast<USceneComponent>(Component.Preview))
         {
             // Remove template attachment pointers before registering the duplicate in the preview world.
-            const FTransform Relative = CastChecked<USceneComponent>(Component.Source)->GetRelativeTransform();
+            const FTransform Relative = Component.bWorldSpace ? Component.SavedTransform : CastChecked<USceneComponent>(Component.Source)->GetRelativeTransform();
             SceneComponent->SetupAttachment(nullptr);
             SceneComponent->SetRelativeTransform(Relative);
             SceneComponents.Add(Component.Id, SceneComponent);
@@ -362,6 +416,7 @@ void FAssetPreviewSession::BuildPreviewComponents()
     {
         if (USceneComponent* Child = Cast<USceneComponent>(Component.Preview))
         {
+            if (!Component.bWorldSpace)
             if (USceneComponent** Parent = SceneComponents.Find(Component.Parent))
                 if (*Parent != Child && !(*Parent)->IsAttachedTo(Child)) Child->SetupAttachment(*Parent, Component.Socket);
         }
@@ -389,7 +444,9 @@ TSharedRef<FJsonObject> FAssetPreviewSession::Describe() const
     Result->SetStringField(TEXT("name"), Asset->GetName());
     Result->SetStringField(TEXT("type"), Asset->GetClass()->GetName());
     Result->SetStringField(TEXT("notice"), Notice);
-    Result->SetBoolField(TEXT("visual"), !TexturePng.IsEmpty() || Capture != nullptr);
+    Result->SetBoolField(TEXT("visual"), !TexturePng.IsEmpty() || Capture != nullptr || Widget != nullptr);
+    Result->SetStringField(TEXT("previewKind"), Widget ? TEXT("widget") : !TexturePng.IsEmpty() ? TEXT("image") : bMap ? TEXT("map") : TEXT("scene"));
+    Result->SetBoolField(TEXT("hierarchyTruncated"), bHierarchyLimited);
     auto EncodeBounds = [](const FBox& Box)
     {
         TArray<TSharedPtr<FJsonValue>> Values;
@@ -487,7 +544,7 @@ TSharedRef<FJsonObject> FAssetPreviewSession::Inspect() const
         Objects->SetObjectField(Component.Id, InspectObject(Component.Id));
     }
     Result->SetObjectField(TEXT("details"), Objects);
-    Result->SetBoolField(TEXT("componentsTruncated"), Components.Num() > 128 || RemainingRows <= 0);
+    Result->SetBoolField(TEXT("componentsTruncated"), bHierarchyLimited || Components.Num() > 128 || RemainingRows <= 0);
     TArray<TSharedPtr<FJsonValue>> GraphRows;
     static const TSet<FName> LayoutFields = {TEXT("NodePosX"), TEXT("NodePosY"), TEXT("NodeWidth"), TEXT("NodeHeight"), TEXT("NodeGuid"),
         TEXT("Pins"), TEXT("NodeComment"), TEXT("bCommentBubblePinned"), TEXT("bCommentBubbleVisible"), TEXT("bHasCompilerMessage"),
@@ -605,9 +662,18 @@ TSharedRef<FJsonObject> FAssetPreviewSession::Details(const FString& ComponentId
 FBox FAssetPreviewSession::Bounds(const FString& ComponentId) const
 {
     FBox Box(ForceInit);
+    TMap<FString, FString> Parents;
+    for (const auto& Component : Components) Parents.Add(Component.Id, Component.Parent);
     for (const FAssetPreviewComponent& Component : Components)
     {
-        if (ComponentId != TEXT("asset") && Component.Id != ComponentId) continue;
+        bool bIncluded = ComponentId == TEXT("asset");
+        FString Parent = Component.Id;
+        for (int32 Depth = 0; !bIncluded && Depth < 64 && !Parent.IsEmpty(); ++Depth)
+        {
+            bIncluded = Parent == ComponentId;
+            Parent = Parents.FindRef(Parent);
+        }
+        if (!bIncluded) continue;
         if (const UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Component.Preview))
             if (Primitive->IsRegistered()) Box += Primitive->Bounds.GetBox();
     }
@@ -619,6 +685,7 @@ bool FAssetPreviewSession::Render(double Yaw, double Pitch, double Zoom, const F
     TArray<uint8>& OutPng, FString& Error, const FBox* SharedBounds)
 {
     check(IsInGameThread());
+    if (Widget) return Widget->Render(OutPng, Error);
     if (!TexturePng.IsEmpty()) { OutPng = TexturePng; return true; }
     if (!Capture || !RenderTarget || !FApp::CanEverRender())
     {

@@ -61,7 +61,8 @@ final class Inspection {
             Map<String, Logic> logic,
             double[] bounds,
             boolean limited,
-            boolean logicComplete) {
+            boolean logicComplete,
+            boolean hierarchyComplete) {
         static Snapshot read(JsonObject json) {
             Map<String, String> keysById = new HashMap<>();
             keysById.put("asset", "asset");
@@ -74,7 +75,10 @@ final class Inspection {
             Map<String, ObjectNode> objects = new LinkedHashMap<>();
             JsonObject details =
                     json.has("details") ? json.getAsJsonObject("details") : new JsonObject();
-            boolean limited = bool(json, "componentsTruncated") || bool(json, "logicTruncated");
+            boolean limited =
+                    bool(json, "componentsTruncated")
+                            || bool(json, "logicTruncated")
+                            || bool(json, "hierarchyTruncated");
             JsonObject root = new JsonObject();
             root.addProperty("id", "asset");
             root.addProperty("name", text(json, "name"));
@@ -171,7 +175,12 @@ final class Inspection {
                     Collections.unmodifiableMap(logic),
                     Inspection.bounds(json),
                     limited,
-                    !bool(json, "logicTruncated"));
+                    !bool(json, "logicTruncated"),
+                    !bool(
+                            json,
+                            json.has("hierarchyTruncated")
+                                    ? "hierarchyTruncated"
+                                    : "componentsTruncated"));
         }
     }
 
@@ -234,6 +243,8 @@ final class Inspection {
         int added = 0, removed = 0;
         for (String key : union(a.keySet(), b.keySet())) {
             ObjectNode left = a.get(key), right = b.get(key), shown = right == null ? left : right;
+            if ((left == null && before != null && !before.hierarchyComplete)
+                    || (right == null && after != null && !after.hierarchyComplete)) continue;
             Change structural =
                     left == null ? Change.ADDED : right == null ? Change.REMOVED : Change.SAME;
             if (!key.equals("asset")) {

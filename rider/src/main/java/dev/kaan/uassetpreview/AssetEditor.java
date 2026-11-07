@@ -32,7 +32,7 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
     private final JPanel panel = new JPanel(new BorderLayout(0, 8));
     private final JLabel status = new JLabel("Connecting to Unreal Editor…");
     private final JLabel title = new JLabel();
-    private final Tree tree = new Tree(new DefaultMutableTreeNode("Components"));
+    private final Tree tree = new Tree(new DefaultMutableTreeNode("Hierarchy"));
     private final DefaultTableModel properties =
             new DefaultTableModel(new Object[] {"Category", "Property", "Value"}, 0) {
                 @Override
@@ -47,6 +47,9 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
     private final JTextArea explanation = new JTextArea(4, 20);
     private final java.util.List<JsonObject> propertyMetadata = new ArrayList<>();
     private boolean visual = true;
+    private boolean orbit = true;
+    private final JButton frame = new JButton("Frame selected"), reset = new JButton("Frame asset");
+    private final JLabel cameraHint = new JLabel("Drag to orbit · Scroll to zoom");
     private final ExecutorService worker =
             Executors.newSingleThreadExecutor(task -> {
                 Thread thread = new Thread(task, "Unreal asset preview");
@@ -73,7 +76,6 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEADING, 8, 4));
         toolbar.add(title);
         toolbar.add(reconnect);
-        JButton frame = new JButton("Frame selected"), reset = new JButton("Frame asset");
         toolbar.add(frame);
         toolbar.add(reset);
         reconnect.addActionListener(event -> reload());
@@ -182,7 +184,7 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
         advanced.addActionListener(event -> select(selected));
         detailsPane.setMinimumSize(new Dimension(230, 160));
         viewport.setMinimumSize(new Dimension(200, 160));
-        JPanel hierarchyPane = section("Components", new JBScrollPane(tree));
+        JPanel hierarchyPane = section("Hierarchy", new JBScrollPane(tree));
         hierarchyPane.setMinimumSize(new Dimension(150, 160));
         JSplitPane content = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, viewport, detailsPane);
         content.setResizeWeight(0.60);
@@ -206,7 +208,7 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
         panel.add(all, BorderLayout.CENTER);
         JPanel footer = new JPanel(new BorderLayout());
         footer.add(status, BorderLayout.CENTER);
-        footer.add(new JLabel("Drag to orbit · Scroll to zoom"), BorderLayout.EAST);
+        footer.add(cameraHint, BorderLayout.EAST);
         panel.add(footer, BorderLayout.SOUTH);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         cameraTimer =
@@ -261,9 +263,22 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
                             visual
                                     ? ""
                                     : "This asset has no 3D geometry. Explore its saved settings in"
-                                          + " Details.";
+                                            + " Details.";
                     viewport.repaint();
                     explanation.setText(AssetKnowledge.asset(asset.get("type").getAsString()));
+                    String kind =
+                            asset.has("previewKind")
+                                    ? asset.get("previewKind").getAsString()
+                                    : "scene";
+                    orbit = kind.equals("scene") || kind.equals("map");
+                    frame.setVisible(orbit);
+                    reset.setVisible(orbit);
+                    cameraHint.setText(
+                            orbit
+                                    ? "Drag to orbit · Scroll to zoom"
+                                    : kind.equals("widget")
+                                            ? "Design preview · 1280 × 720"
+                                            : "Image preview");
                     fillHierarchy(asset.getAsJsonArray("components"));
                     status.setText(asset.get("notice").getAsString());
                     focus = "asset";
@@ -482,6 +497,7 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
 
                         @Override
                         public void mouseDragged(MouseEvent event) {
+                            if (!orbit) return;
                             if (last == null) return;
                             yaw -= (event.getX() - last.x) * 0.5;
                             pitch =
@@ -494,6 +510,7 @@ final class AssetEditor extends UserDataHolderBase implements FileEditor {
 
                         @Override
                         public void mouseWheelMoved(MouseWheelEvent event) {
+                            if (!orbit) return;
                             zoom =
                                     Math.max(
                                             0.08,
