@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RiderHome = "$env:LOCALAPPDATA\Programs\Rider",
+    [string]$ReviewEvidence,
     [switch]$Test
 )
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,9 @@ $classes = Join-Path $buildRoot ('classes-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $classes -Force | Out-Null
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $taskRoot 'rider\src\main\java') -Filter '*.java' -Recurse -File)
 $classpath = (Get-ChildItem -LiteralPath (Join-Path $RiderHome 'lib') -Filter '*.jar' -File | ForEach-Object FullName) -join ';'
+$vcsApi = Join-Path $RiderHome 'lib\modules\intellij.platform.vcs.impl.jar'
+if (!(Test-Path -LiteralPath $vcsApi)) { throw 'The Rider VCS diff API is missing from this installation.' }
+$classpath += ';' + $vcsApi
 $argumentsFile = Join-Path $buildRoot 'javac.args'
 $compileArguments = @('--release', '21', '-encoding', 'UTF-8', '-Xlint:deprecation', '-classpath', $classpath, '-d', $classes) + @($sources.FullName)
 $argumentText = ($compileArguments | ForEach-Object { '"' + $_.Replace('\', '/').Replace('"', '\"') + '"' }) -join "`n"
@@ -47,9 +51,17 @@ Write-Output "Plugin: $archive"
 if ($Test) {
     $testClasses = Join-Path $buildRoot ('tests-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $testClasses -Force | Out-Null
-    $testSource = Join-Path $taskRoot 'rider\src\test\java\dev\kaan\uassetpreview\BridgeClientTest.java'
-    & $javac '--release' '21' '-encoding' 'UTF-8' '-classpath' "$classes;$classpath" '-d' $testClasses $testSource
+    $testSources = @(Get-ChildItem -LiteralPath (Join-Path $taskRoot 'rider\src\test\java') -Filter '*.java' -Recurse -File | ForEach-Object FullName)
+    & $javac '--release' '21' '-encoding' 'UTF-8' '-classpath' "$classes;$classpath" '-d' $testClasses @testSources
     if ($LASTEXITCODE -ne 0) { throw 'Transport test compilation failed.' }
     & $java '-ea' '-Djava.awt.headless=true' '-classpath' "$testClasses;$classes;$classpath" 'dev.kaan.uassetpreview.BridgeClientTest'
     if ($LASTEXITCODE -ne 0) { throw 'Transport tests failed.' }
+    & $java '-ea' '-Djava.awt.headless=true' '-classpath' "$testClasses;$classes;$classpath" 'dev.kaan.uassetpreview.InspectionTest'
+    if ($LASTEXITCODE -ne 0) { throw 'Revision review tests failed.' }
+    if($ReviewEvidence){
+        & $java '-ea' '-Djava.awt.headless=true' '-classpath' "$testClasses;$classes;$classpath" 'dev.kaan.uassetpreview.InspectionTest' (Join-Path $ReviewEvidence 'before.json') (Join-Path $ReviewEvidence 'after.json')
+        if($LASTEXITCODE -ne 0){throw 'Real Unreal snapshot comparison failed.'}
+    }
+    & $java '-ea' '-Djava.awt.headless=true' '-classpath' "$testClasses;$classes;$classpath" 'dev.kaan.uassetpreview.AssetDiffToolTest'
+    if ($LASTEXITCODE -ne 0) { throw 'Rider diff adapter tests failed.' }
 }

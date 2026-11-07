@@ -19,12 +19,25 @@
 #include "HAL/PlatformTime.h"
 #include "ImageUtils.h"
 #include "DetailsExport.h"
+#include "DiffUtils.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "HAL/FileManager.h"
+#include "K2Node_CallFunction.h"
 #include "Misc/App.h"
 #include "Misc/PackageName.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "PreviewScene.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 #include "TextureResource.h"
 #include "UObject/Package.h"
+#include "Misc/PackagePath.h"
+#include "UObject/Linker.h"
+#include "UObject/UObjectHash.h"
+#include "RenderingThread.h"
 #include "UObject/UnrealType.h"
 
 namespace
@@ -51,6 +64,35 @@ FAssetPreviewSession::~FAssetPreviewSession()
     if (Capture) Capture->UnregisterComponent();
     if (Host && Scene) Scene->GetWorld()->DestroyActor(Host);
     Scene.Reset();
+    Components.Reset(); Asset = nullptr; DetailsObject = nullptr; Host = nullptr; Capture = nullptr; RenderTarget = nullptr;
+    // Never use PackageTools::UnloadPackages here: it clears the user's selection
+    // and can reset undo history. Only our /Temp revision exports lose standalone
+    // retention; the editor's normal garbage collection can then reclaim them.
+    UPackage* OwnedPackage = RevisionPackage;
+    RevisionPackage = nullptr;
+    if (OwnedPackage && OwnedPackage->HasAnyPackageFlags(PKG_ForDiffing) && FPackageName::IsTempPackage(OwnedPackage->GetName()))
+    {
+        FlushRenderingCommands();
+        ResetLoaders(OwnedPackage);
+        TArray<UObject*> Objects;
+        GetObjectsWithPackage(OwnedPackage, Objects, EGetObjectsFlags::IncludeNestedObjects);
+        for (UObject* Object : Objects)
+        {
+            if (UBlueprint* Blueprint = Cast<UBlueprint>(Object))
+            {
+                Blueprint->ClearEditorReferences();
+                for (const auto& Dependency : Blueprint->CachedDependencies)
+                    if (UBlueprint* Other = Dependency.Get()) Other->CachedDependents.Remove(Blueprint);
+                for (const auto& Dependent : Blueprint->CachedDependents)
+                    if (UBlueprint* Other = Dependent.Get()) Other->CachedDependencies.Remove(Blueprint);
+                Blueprint->CachedDependencies.Reset(); Blueprint->CachedDependents.Reset();
+            }
+            Object->ClearFlags(RF_Standalone);
+            Object->SetFlags(RF_Transient);
+        }
+        OwnedPackage->ClearFlags(RF_Standalone);
+        OwnedPackage->SetFlags(RF_Transient);
+    }
 }
 
 void FAssetPreviewSession::Touch() { LastAccess = FPlatformTime::Seconds(); }
@@ -62,6 +104,7 @@ void FAssetPreviewSession::AddReferencedObjects(FReferenceCollector& Collector)
     Collector.AddReferencedObject(Host);
     Collector.AddReferencedObject(Capture);
     Collector.AddReferencedObject(RenderTarget);
+    Collector.AddReferencedObject(RevisionPackage);
     for (FAssetPreviewComponent& Component : Components)
     {
         Collector.AddReferencedObject(Component.Source);
@@ -69,19 +112,41 @@ void FAssetPreviewSession::AddReferencedObjects(FReferenceCollector& Collector)
     }
 }
 
-bool FAssetPreviewSession::Open(const FString& Filename, FString& Error)
+bool FAssetPreviewSession::Open(const FString& Filename, FString& Error, const FString& Snapshot)
 {
     check(IsInGameThread());
     FString LongPackage;
     if (Filename.Len() > 4096 || !FPaths::GetExtension(Filename).Equals(TEXT("uasset"), ESearchCase::IgnoreCase)
-        || !FPaths::FileExists(Filename)
+        || (Snapshot.IsEmpty() && !FPaths::FileExists(Filename))
         || !FPackageName::TryConvertFilenameToLongPackageName(Filename, LongPackage)
         || !FPackageName::IsValidLongPackageName(LongPackage))
     {
         Error = TEXT("Select an existing .uasset inside this project's registered Content mounts.");
         return false;
     }
-    UPackage* Package = LoadPackage(nullptr, *LongPackage, LOAD_None);
+    OriginalPackage = LongPackage;
+    UPackage* Package = nullptr;
+    if (Snapshot.IsEmpty()) Package = LoadPackage(nullptr, *LongPackage, LOAD_None);
+    else
+    {
+        // Use Unreal's own revision loader: PKG_ForDiffing and an instancing context
+        // keep old generated classes separate from the project's live package.
+        const FString Root = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("RiderAssetPreview/Diff/"));
+        FString Full = FPaths::ConvertRelativePathToFull(Snapshot);
+        FPaths::NormalizeFilename(Full);
+        FString NormalizedRoot = Root;
+        FPaths::NormalizeDirectoryName(NormalizedRoot);
+        NormalizedRoot += TEXT("/");
+        if (!Full.StartsWith(NormalizedRoot, ESearchCase::IgnoreCase) || Full.Contains(TEXT("/../"))
+            || !FPaths::GetExtension(Full).Equals(TEXT("uasset"), ESearchCase::IgnoreCase)
+            || IFileManager::Get().FileSize(*Full) <= 0 || IFileManager::Get().FileSize(*Full) > 128ll * 1024 * 1024)
+        {
+            Error = TEXT("Revision snapshots must be .uasset files below this project's Saved/RiderAssetPreview/Diff folder (128 MB maximum).");
+            return false;
+        }
+        Package = DiffUtils::LoadPackageForDiff(FPackagePath::FromLocalPath(Full), FPackagePath::FromLocalPath(Filename));
+        RevisionPackage = Package;
+    }
     if (!Package)
     {
         Error = TEXT("Unreal could not load the asset package. Check the Editor Output Log.");
@@ -132,7 +197,7 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error)
         UStaticMeshComponent* Component = NewObject<UStaticMeshComponent>(GetTransientPackage());
         Component->SetFlags(RF_Transient);
         Component->SetStaticMesh(StaticMesh);
-        Components.Add({TEXT("mesh"), TEXT("asset"), StaticMesh->GetName(), Component, nullptr});
+        Components.Add({TEXT("mesh"), TEXT("asset"), StaticMesh->GetName(), Component, nullptr, NAME_None, TEXT("mesh")});
         Notice = TEXT("Static Mesh · Unreal renderer · properties are read-only");
     }
     else if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(Asset))
@@ -140,14 +205,15 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error)
         USkeletalMeshComponent* Component = NewObject<USkeletalMeshComponent>(GetTransientPackage());
         Component->SetFlags(RF_Transient);
         Component->SetSkeletalMesh(SkeletalMesh);
-        Components.Add({TEXT("mesh"), TEXT("asset"), SkeletalMesh->GetName(), Component, nullptr});
+        Components.Add({TEXT("mesh"), TEXT("asset"), SkeletalMesh->GetName(), Component, nullptr, NAME_None, TEXT("mesh")});
         Notice = TEXT("Skeletal Mesh reference pose · no animation playback · properties are read-only");
     }
     else
     {
-        Error = FString::Printf(TEXT("%s is not supported yet. Use an Actor Blueprint, Static Mesh, Skeletal Mesh or Texture2D."), *Asset->GetClass()->GetName());
-        return false;
+        Notice = TEXT("Settings inspection · this asset has no 3D preview · values are read-only");
     }
+
+    if (Components.IsEmpty()) return true;
 
     Scene = MakeUnique<FPreviewScene>(FPreviewScene::ConstructionValues()
         .SetCreatePhysicsScene(false).ShouldSimulatePhysics(false).SetTransactional(false)
@@ -194,10 +260,16 @@ bool FAssetPreviewSession::Open(const FString& Filename, FString& Error)
 bool FAssetPreviewSession::OpenBlueprint(UBlueprint* Blueprint, FString& Error)
 {
     UBlueprintGeneratedClass* Generated = Cast<UBlueprintGeneratedClass>(Blueprint->GeneratedClass);
-    if (!Generated || !Generated->IsChildOf(AActor::StaticClass()))
+    if (!Generated)
     {
         Error = TEXT("The preview currently supports compiled Actor Blueprints. Compile it in Unreal Editor first.");
         return false;
+    }
+    if (!Generated->IsChildOf(AActor::StaticClass()))
+    {
+        DetailsObject = Generated->GetDefaultObject();
+        Notice = TEXT("Blueprint class defaults · no Actor geometry · scripts are not executed");
+        return DetailsObject != nullptr;
     }
     AActor* Defaults = Cast<AActor>(Generated->GetDefaultObject());
     if (!Defaults)
@@ -255,7 +327,8 @@ bool FAssetPreviewSession::OpenBlueprint(UBlueprint* Blueprint, FString& Error)
             FString Parent = TEXT("asset");
             if (const FString* LocalParent = ChildParents.Find(Node)) Parent = *LocalParent;
             else if (const FString* ExternalParent = Names.Find(Node->ParentComponentOrVariableName)) Parent = *ExternalParent;
-            Components.Add({*Key, Parent, Node->GetVariableName().ToString(), Node->GetActualComponentTemplate(Generated), nullptr, Node->AttachToName});
+            Components.Add({*Key, Parent, Node->GetVariableName().ToString(), Node->GetActualComponentTemplate(Generated), nullptr, Node->AttachToName,
+                Node->VariableGuid.IsValid() ? TEXT("scs:") + Node->VariableGuid.ToString(EGuidFormats::Digits) : TEXT("scs-name:") + Node->GetVariableName().ToString()});
             Added.Add(*Key);
         }
     }
@@ -316,17 +389,202 @@ TSharedRef<FJsonObject> FAssetPreviewSession::Describe() const
     Result->SetStringField(TEXT("name"), Asset->GetName());
     Result->SetStringField(TEXT("type"), Asset->GetClass()->GetName());
     Result->SetStringField(TEXT("notice"), Notice);
+    Result->SetBoolField(TEXT("visual"), !TexturePng.IsEmpty() || Capture != nullptr);
+    auto EncodeBounds = [](const FBox& Box)
+    {
+        TArray<TSharedPtr<FJsonValue>> Values;
+        for (double Value : {Box.Min.X, Box.Min.Y, Box.Min.Z, Box.Max.X, Box.Max.Y, Box.Max.Z})
+            Values.Add(MakeShared<FJsonValueNumber>(Value));
+        return Values;
+    };
+    Result->SetArrayField(TEXT("bounds"), EncodeBounds(Bounds(TEXT("asset"))));
     TArray<TSharedPtr<FJsonValue>> Nodes;
     for (const FAssetPreviewComponent& Component : Components)
     {
         TSharedRef<FJsonObject> Node = MakeShared<FJsonObject>();
         Node->SetStringField(TEXT("id"), Component.Id);
         Node->SetStringField(TEXT("parent"), Component.Parent);
+        Node->SetStringField(TEXT("socket"), Component.Socket.ToString());
         Node->SetStringField(TEXT("name"), Component.Name);
         Node->SetStringField(TEXT("type"), Component.Source->GetClass()->GetName());
+        Node->SetStringField(TEXT("key"), Component.StableKey.IsEmpty() ? TEXT("native:") + Component.Source->GetName() : Component.StableKey);
+        Node->SetArrayField(TEXT("bounds"), EncodeBounds(Bounds(Component.Id)));
         Nodes.Add(MakeShared<FJsonValueObject>(Node));
     }
     Result->SetArrayField(TEXT("components"), Nodes);
+    return Result;
+}
+
+TSharedRef<FJsonObject> FAssetPreviewSession::Inspect() const
+{
+    TSharedRef<FJsonObject> Result = Describe();
+    const FString PackageName = Asset->GetOutermost()->GetName();
+    TSharedRef<FJsonObject> Objects = MakeShared<FJsonObject>();
+    int32 RemainingRows = 3000;
+    auto InspectObject = [this, &RemainingRows](const FString& ComponentId)
+    {
+        TSharedRef<FJsonObject> Data = Details(ComponentId, true);
+        TArray<TSharedPtr<FJsonValue>> Rows = Data->GetArrayField(TEXT("properties"));
+        if (Rows.Num() > RemainingRows) { Rows.SetNum(RemainingRows); Data->SetBoolField(TEXT("truncated"), true); }
+        RemainingRows -= Rows.Num();
+        for (const auto& Value : Rows)
+        {
+            const auto Row = Value->AsObject();
+            const TPair<FString, int32> Limits[] = {{TEXT("value"), 512}, {TEXT("diffValue"), 1024}, {TEXT("tooltip"), 512}};
+            for (const auto& Limit : Limits)
+            {
+                const FString Full = Row->GetStringField(Limit.Key);
+                if (Full.Len() > Limit.Value) { Row->SetStringField(Limit.Key, Full.Left(Limit.Value)); Row->SetBoolField(TEXT("truncated"), true); }
+            }
+        }
+        Data->SetArrayField(TEXT("properties"), Rows);
+        return Data;
+    };
+    Objects->SetObjectField(TEXT("asset"), InspectObject(TEXT("asset")));
+    // Derived asset facts belong to the review, rather than the editable Details
+    // panel. Counts reveal useful changes without claiming a full geometry diff.
+    TArray<TSharedPtr<FJsonValue>> Facts = Objects->GetObjectField(TEXT("asset"))->GetArrayField(TEXT("properties"));
+    auto Fact = [&Facts](const FString& Key, const FString& Label, const FString& Value, const FString& Tooltip)
+    {
+        TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+        Row->SetStringField(TEXT("key"), TEXT("fact:") + Key);
+        Row->SetStringField(TEXT("property"), Key);
+        Row->SetStringField(TEXT("category"), TEXT("Asset information"));
+        Row->SetStringField(TEXT("name"), Label);
+        Row->SetStringField(TEXT("value"), Value);
+        Row->SetStringField(TEXT("diffValue"), Value);
+        Row->SetStringField(TEXT("tooltip"), Tooltip);
+        Facts.Add(MakeShared<FJsonValueObject>(Row));
+    };
+    if (const UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
+    {
+        if (Blueprint->GeneratedClass && Blueprint->GeneratedClass->GetSuperClass())
+            Fact(TEXT("ParentClass"), TEXT("Parent class"), Blueprint->GeneratedClass->GetSuperClass()->GetName(),
+                TEXT("The class this Blueprint inherits its starting behavior and settings from. Changing a parent can affect inherited components and defaults."));
+    }
+    if (const UStaticMesh* Mesh = Cast<UStaticMesh>(Asset))
+    {
+        Fact(TEXT("LODCount"), TEXT("Level-of-detail count"), FString::FromInt(Mesh->GetNumLODs()), TEXT("The number of mesh detail levels available for rendering at different distances."));
+        if (Mesh->GetNumLODs() > 0)
+        {
+            Fact(TEXT("Vertices"), TEXT("Vertices at highest detail"), FString::FromInt(Mesh->GetNumVertices(0)), TEXT("The number of points in the highest-detail render mesh. Equal counts do not guarantee identical geometry."));
+            Fact(TEXT("Triangles"), TEXT("Triangles at highest detail"), FString::FromInt(Mesh->GetNumTriangles(0)), TEXT("The number of triangles in the highest-detail render mesh. More triangles generally mean more geometry to render."));
+        }
+    }
+    if (const USkeletalMesh* Mesh = Cast<USkeletalMesh>(Asset))
+    {
+        Fact(TEXT("LODCount"), TEXT("Level-of-detail count"), FString::FromInt(Mesh->GetLODNum()), TEXT("The number of available mesh detail levels."));
+        Fact(TEXT("BoneCount"), TEXT("Skeleton bone count"), FString::FromInt(Mesh->GetRefSkeleton().GetNum()), TEXT("The number of bones in the reference skeleton used to deform and animate this mesh."));
+    }
+    if (const UTexture2D* Texture = Cast<UTexture2D>(Asset))
+        Fact(TEXT("SourceDimensions"), TEXT("Source image dimensions"), FString::Printf(TEXT("%lld × %lld px"), Texture->Source.GetSizeX(), Texture->Source.GetSizeY()),
+            TEXT("The source image width and height in pixels. Preview images may be downscaled; pixel differences are shown at a shared preview resolution."));
+    Objects->GetObjectField(TEXT("asset"))->SetArrayField(TEXT("properties"), Facts);
+    int32 Count = 0;
+    for (const FAssetPreviewComponent& Component : Components)
+    {
+        if (++Count > 128 || RemainingRows <= 0) break;
+        Objects->SetObjectField(Component.Id, InspectObject(Component.Id));
+    }
+    Result->SetObjectField(TEXT("details"), Objects);
+    Result->SetBoolField(TEXT("componentsTruncated"), Components.Num() > 128 || RemainingRows <= 0);
+    TArray<TSharedPtr<FJsonValue>> GraphRows;
+    static const TSet<FName> LayoutFields = {TEXT("NodePosX"), TEXT("NodePosY"), TEXT("NodeWidth"), TEXT("NodeHeight"), TEXT("NodeGuid"),
+        TEXT("Pins"), TEXT("NodeComment"), TEXT("bCommentBubblePinned"), TEXT("bCommentBubbleVisible"), TEXT("bHasCompilerMessage"),
+        TEXT("ErrorType"), TEXT("ErrorMsg"), TEXT("NodeUpgradeMessage"), TEXT("CommentColor"), TEXT("bCanResizeNode")};
+    if (const UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
+    {
+        TArray<UEdGraph*> Graphs;
+        Blueprint->GetAllGraphs(Graphs);
+        for (const UEdGraph* Graph : Graphs)
+        {
+            if (!Graph) continue;
+            for (const UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (!Node || GraphRows.Num() >= 512) continue;
+                TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
+                Row->SetStringField(TEXT("key"), Graph->GraphGuid.ToString(EGuidFormats::Digits) + TEXT(":") + Node->NodeGuid.ToString(EGuidFormats::Digits));
+                Row->SetStringField(TEXT("graph"), Graph->GetName());
+                Row->SetStringField(TEXT("name"), Node->GetNodeTitle(ENodeTitleType::ListView).ToString());
+                Row->SetStringField(TEXT("type"), Node->GetClass()->GetName());
+                Row->SetStringField(TEXT("tooltip"), Node->GetTooltipText().ToString().Left(2048));
+                TArray<FString> PinData;
+                TArray<FString> PinDisplay;
+                // A function/member reference can change without changing the
+                // displayed title or pin defaults. Compare serialized node settings
+                // too, excluding layout and compiler diagnostics.
+                for (TFieldIterator<FProperty> Property(Node->GetClass()); Property; ++Property)
+                {
+                    if (LayoutFields.Contains(Property->GetFName()) || Property->HasAnyPropertyFlags(CPF_Transient | CPF_Deprecated | CPF_DuplicateTransient | CPF_NonPIEDuplicateTransient)) continue;
+                    FString Value;
+                    Property->ExportText_InContainer(0, Value, Node, nullptr, const_cast<UEdGraphNode*>(Node), PPF_None);
+                    PinData.Add(TEXT("setting:") + Property->GetName() + TEXT("=") + Value);
+                }
+                if (const UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(Node))
+                    if (const UFunction* Function = Call->GetTargetFunction()) PinDisplay.Add(TEXT("Function: ") + Function->GetOuter()->GetName() + TEXT(" / ") + Function->GetName());
+                for (const UEdGraphPin* Pin : Node->Pins)
+                {
+                    if (!Pin) continue;
+                    FString Entry = Pin->PinName.ToString() + TEXT("=") + Pin->DefaultValue + TEXT("|") + Pin->DefaultTextValue.ToString();
+                    FString TypeText;
+                    FEdGraphPinType::StaticStruct()->ExportText(TypeText, &Pin->PinType, nullptr, nullptr, PPF_None, nullptr);
+                    Entry += TEXT("|") + TypeText;
+                    if (Pin->DefaultObject) Entry += TEXT("|") + Pin->DefaultObject->GetPathName();
+                    TArray<FString> Links;
+                    TArray<FString> FriendlyLinks;
+                    for (const UEdGraphPin* Linked : Pin->LinkedTo)
+                        if (Linked && Linked->GetOwningNode())
+                        {
+                            Links.Add(Linked->GetOwningNode()->NodeGuid.ToString(EGuidFormats::Digits) + TEXT("/") + Linked->PinName.ToString());
+                            FriendlyLinks.Add(Linked->GetOwningNode()->GetNodeTitle(ENodeTitleType::ListView).ToString() + TEXT(" / ") + Linked->GetDisplayName().ToString());
+                        }
+                    Links.Sort();
+                    Entry += TEXT(" -> ") + FString::Join(Links, TEXT(","));
+                    PinData.Add(Entry);
+                    FriendlyLinks.Sort();
+                    FString Display = Pin->GetDisplayName().ToString();
+                    if (Display.IsEmpty()) Display = FName::NameToDisplayString(Pin->PinName.ToString(), false);
+                    if (!FriendlyLinks.IsEmpty()) Display += TEXT(" -> ") + FString::Join(FriendlyLinks, TEXT(", "));
+                    else if (Pin->DefaultObject) Display += TEXT(": ") + Pin->DefaultObject->GetName();
+                    else if (!Pin->DefaultValue.IsEmpty()) Display += TEXT(": ") + Pin->DefaultValue;
+                    else if (!Pin->DefaultTextValue.IsEmpty()) Display += TEXT(": ") + Pin->DefaultTextValue.ToString();
+                    else continue;
+                    PinDisplay.Add(Display);
+                }
+                PinData.Sort();
+                const FString FullValue = FString::Join(PinData, TEXT("\n")).Replace(*PackageName, TEXT("$ASSET"), ESearchCase::CaseSensitive);
+                const FTCHARToUTF8 Bytes(*FullValue);
+                uint8 Digest[FSHA1::DigestSize];
+                FSHA1::HashBuffer(Bytes.Get(), Bytes.Length(), Digest);
+                Row->SetStringField(TEXT("fingerprint"), BytesToHex(Digest, FSHA1::DigestSize));
+                const FString DisplayValue = FString::Join(PinDisplay, TEXT("\n"));
+                Row->SetStringField(TEXT("value"), DisplayValue.Left(4096));
+                Row->SetBoolField(TEXT("truncated"), DisplayValue.Len() > 4096);
+                GraphRows.Add(MakeShared<FJsonValueObject>(Row));
+            }
+        }
+    }
+    Result->SetArrayField(TEXT("logic"), GraphRows);
+    Result->SetBoolField(TEXT("logicTruncated"), GraphRows.Num() >= 512);
+    // Keep protocol IDs unchanged; normalize only values containing our temporary
+    // package instance, so equivalent self-references compare equal across revisions.
+    for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Objects->Values)
+    {
+        for (const TSharedPtr<FJsonValue>& Value : Pair.Value->AsObject()->GetArrayField(TEXT("properties")))
+        {
+            TSharedPtr<FJsonObject> Row = Value->AsObject();
+            for (const FString Field : {TEXT("value"), TEXT("diffValue")})
+            {
+                FString Text;
+                if (Row->TryGetStringField(Field, Text)) Row->SetStringField(Field, Text.Replace(*PackageName, TEXT("$ASSET"), ESearchCase::CaseSensitive));
+            }
+        }
+    }
+    for (const TSharedPtr<FJsonValue>& Value : GraphRows)
+    {
+        TSharedPtr<FJsonObject> Row = Value->AsObject();
+        Row->SetStringField(TEXT("value"), Row->GetStringField(TEXT("value")).Replace(*PackageName, TEXT("$ASSET"), ESearchCase::CaseSensitive));
+    }
     return Result;
 }
 
@@ -341,7 +599,7 @@ TSharedRef<FJsonObject> FAssetPreviewSession::Details(const FString& ComponentId
     UObject* Object = DetailsObject;
     for (const FAssetPreviewComponent& Component : Components)
         if (Component.Id == ComponentId) { Object = Component.Source; break; }
-    return ExportBlueprintDetails(Object, bShowAdvanced);
+    return ExportBlueprintDetails(Object, bShowAdvanced, Asset->GetOutermost()->GetName());
 }
 
 FBox FAssetPreviewSession::Bounds(const FString& ComponentId) const
@@ -358,7 +616,7 @@ FBox FAssetPreviewSession::Bounds(const FString& ComponentId) const
 }
 
 bool FAssetPreviewSession::Render(double Yaw, double Pitch, double Zoom, const FString& Focus,
-    TArray<uint8>& OutPng, FString& Error)
+    TArray<uint8>& OutPng, FString& Error, const FBox* SharedBounds)
 {
     check(IsInGameThread());
     if (!TexturePng.IsEmpty()) { OutPng = TexturePng; return true; }
@@ -367,7 +625,7 @@ bool FAssetPreviewSession::Render(double Yaw, double Pitch, double Zoom, const F
         Error = TEXT("Unreal rendering is unavailable. Run the Editor with a graphics device, without -nullrhi.");
         return false;
     }
-    const FBox Box = Bounds(Focus);
+    const FBox Box = SharedBounds ? *SharedBounds : Bounds(Focus);
     const double Radius = FMath::Max(25.0, Box.GetExtent().Size());
     const FRotator Orbit(-FMath::Clamp(Pitch, -85.0, 85.0), FMath::Fmod(Yaw, 360.0), 0);
     const FVector Location = Box.GetCenter() - Orbit.Vector() * Radius * 3.2 * FMath::Clamp(Zoom, 0.08, 20.0);

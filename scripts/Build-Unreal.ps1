@@ -2,6 +2,7 @@
 param(
     [string]$EngineRoot = 'C:\Program Files\Epic Games\UE_5.8',
     [string]$HostProject,
+    [switch]$AllowOtherProjects,
     [ValidateRange(1, 3)][int]$MaxParallelActions = 1
 )
 $ErrorActionPreference = 'Stop'
@@ -9,9 +10,13 @@ $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 # Live Coding and editor-loaded DLLs make external builds unreliable. Never close user sessions.
 $activeEditors = @(Get-Process -Name UnrealEditor,UnrealEditor-Cmd -ErrorAction SilentlyContinue)
 $activeLiveCoding = @(Get-Process -Name LiveCodingConsole -ErrorAction SilentlyContinue)
-if ($activeEditors.Count -gt 0 -or $activeLiveCoding.Count -gt 0) {
+if (($activeEditors.Count -gt 0 -or $activeLiveCoding.Count -gt 0) -and !$AllowOtherProjects) {
     Write-Output 'BLOCKED (20): Close Unreal Editor and Live Coding manually, then run this script again. No build was started.'
     exit 20
+}
+if ($AllowOtherProjects) {
+    if(!$HostProject){throw '-AllowOtherProjects requires an explicit existing isolated -HostProject.'}
+    & (Join-Path $PSScriptRoot 'Assert-HostIsolation.ps1') -HostProject $HostProject
 }
 $buildCommand = Join-Path $EngineRoot 'Engine\Build\BatchFiles\Build.bat'
 if (!(Test-Path -LiteralPath $buildCommand)) { throw "Unreal Build.bat not found: $EngineRoot" }

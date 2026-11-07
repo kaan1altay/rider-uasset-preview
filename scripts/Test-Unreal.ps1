@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$HostProject,
     [string]$EngineRoot = 'C:\Program Files\Epic Games\UE_5.8',
-    [switch]$KeepAlive
+    [switch]$KeepAlive,
+    [switch]$AllowOtherProjects
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -11,9 +12,10 @@ $allowedRoot = [IO.Path]::GetFullPath((Join-Path $taskRoot 'build')) + [IO.Path]
 if (!$hostFile.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase) -or !(Test-Path -LiteralPath $hostFile)) {
     throw 'Only an isolated host project created beneath this repository build directory may be tested.'
 }
-if (@(Get-Process UnrealEditor,UnrealEditor-Cmd,LiveCodingConsole -ErrorAction SilentlyContinue).Count) {
+if (@(Get-Process UnrealEditor,UnrealEditor-Cmd,LiveCodingConsole -ErrorAction SilentlyContinue).Count -and !$AllowOtherProjects) {
     throw 'Close Unreal Editor/Live Coding first. This test will not touch an existing Editor session.'
 }
+if($AllowOtherProjects){& (Join-Path $PSScriptRoot 'Assert-HostIsolation.ps1') -HostProject $hostFile}
 $output = Join-Path $taskRoot ('build\smoke-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $log = Join-Path $output 'Unreal.log'
@@ -28,7 +30,7 @@ $processInfo.CreateNoWindow = $true
 $processInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
 $processInfo.RedirectStandardOutput = $true
 $processInfo.RedirectStandardError = $true
-foreach ($argument in @($hostFile, '-RenderOffscreen', '-unattended', '-nosplash', '-nosound', '-NoLiveCoding', "-abslog=$log")) {
+foreach ($argument in @($hostFile, '-RenderOffscreen', '-unattended', '-nosplash', '-nosound', '-NoLiveCoding', '-RiderAssetPreviewPort=32189', "-abslog=$log")) {
     $processInfo.ArgumentList.Add($argument)
 }
 $process = [Diagnostics.Process]::Start($processInfo)

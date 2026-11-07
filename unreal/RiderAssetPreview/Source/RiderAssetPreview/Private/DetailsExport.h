@@ -4,4 +4,4 @@
 #include "Dom/JsonObject.h"
 
 /** Export the editor-visible property model, not a dump of reflected fields. */
-TSharedRef<FJsonObject> ExportBlueprintDetails(UObject* Object, bool bShowAdvanced);
+TSharedRef<FJsonObject> ExportBlueprintDetails(UObject* Object, bool bShowAdvanced, const FString& NormalizePackage = FString());

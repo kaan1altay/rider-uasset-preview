@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <plugins>
-  <plugin id="dev.kaan.uassetpreview" url="https://github.com/kaan1altay/rider-uasset-preview/releases/download/v0.1.0/unreal-asset-preview-0.1.0.zip" version="0.1.0">
+  <plugin id="dev.kaan.uassetpreview" url="https://github.com/kaan1altay/rider-uasset-preview/releases/download/v0.2.0/unreal-asset-preview-0.2.0.zip" version="0.2.0">
     <idea-version since-build="253" until-build="253.*" />
     <name>Unreal Asset Preview</name>
   </plugin>

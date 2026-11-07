@@ -33,6 +33,21 @@ $hostProject = (Get-ChildItem .\build\unreal-host-*\AssetPreviewHost.uproject |
 
 This starts its own offscreen Editor, checks Static Mesh, Skeletal Mesh, Texture2D and Actor Blueprint fixtures, and stops its own process when finished. It validates the hierarchy, Details responses, PNG signatures, mesh image variation and camera changes. Reports and images are written to `build/smoke-<timestamp>/`. It refuses to run while an existing Unreal Editor or Live Coding session is active.
 
+For a previously built content-only host, `-AllowOtherProjects` on `Build-Unreal.ps1`, `Test-Unreal.ps1` or `Test-Revisions.ps1` verifies host isolation and permits another game project to remain open. It rejects a running target host, DLLs loaded from that host, unverifiable process state, extra project modules/plugins and junctions. Builds still prohibit engine changes and hot reload. Tests use separate loopback ports.
+
+## Revision regression tests and Git demo
+
+```powershell
+.\scripts\Test-Revisions.ps1 -HostProject $hostProject -AllowOtherProjects
+.\scripts\Start-ReviewDemo.ps1 -HostProject $hostProject
+```
+
+The native test creates and saves before/after Blueprint packages with a scale change, an added component and a changed Print String input. It checks isolated loads, settings, graph data, rendering and revision package GC cleanup. Results are written to `build/revisions-<timestamp>/`.
+
+The review demo creates a local, no-remote Git repository only inside the test host. HEAD contains the before fixture; the working tree contains the after fixture. In the separate Rider window, open **Commit** and double-click the modified `BP_Review` asset. Existing unrelated Git repositories are rejected. Rerunning the same fixture is supported; use a fresh host when switching to a different generated fixture.
+
+Review data flow, identity rules and comparison boundaries are documented in [ASSET_REVIEW.md](ASSET_REVIEW.md).
+
 ## Isolated interactive demo
 
 After both plugins are built:
@@ -64,7 +79,9 @@ The stop script verifies the saved host's PID, process start time and project pa
 
 ## Verification status
 
-The prototype has passed 40 HTTP transport checks, a UE 5.8.4 Windows build, and real offscreen Unreal tests for all four supported asset types. Rider UI checks covered plugin loading, mesh and Blueprint tabs, hierarchy selection, Details refresh, orbit, zoom and framing. The Blueprint Details fixture produced 57 default rows and 180 rows with Advanced enabled.
+Version 0.2.0 passes 55 HTTP transport checks, 42 comparison/LFS/image checks, ten checks using Rider's actual diff request types and packaged extension registration, and 27 distribution checks. Loading the real native before/after fixture into the Java comparison model adds four cross-layer assertions: one added component, the Body scale change, one changed logic node and no false component removal. The Unreal Windows build and revision automation fixture pass, including independent historical defaults, shared-camera PNGs and GC reclamation of a closed revision package. Real offscreen Unreal smoke tests also pass for Static Mesh, Skeletal Mesh, Texture2D and Actor Blueprint.
+
+Earlier Rider UI checks covered plugin loading, mesh and Blueprint tabs, hierarchy selection, Details refresh, orbit, zoom and framing. The Blueprint Details fixture produced 57 default rows and 180 rows with Advanced enabled. The 0.2.0 real Git Commit demo verifies native viewer selection, before/after rendering, component navigation and the Body scale values, plus wipe-slider and pixel-difference modes. Current screenshots come from that isolated Rider profile. Interactive added/deleted, Git History and LFS UI checks remain separate from the adapter and resolver regression coverage.
 
 These are results from the development environment, not a guarantee for other machines or all assets. Engine fixture data and row counts can vary by version. Full Blueprint Editor parity, complex custom components, other engine versions, and interactive Rider tests for skeletal meshes and textures remain unverified. Raw local logs, session files and engine assets are deliberately excluded from the repository.
 
@@ -78,8 +95,8 @@ After building both plugins, pass the compiled Unreal package printed by `Build-
 
 This verifies that the compiled Unreal package contains the current plugin source, then produces:
 
-- `dist/unreal-asset-preview-0.1.0.zip`
-- `dist/RiderAssetPreview-UE5.8-0.1.0.zip`
+- `dist/unreal-asset-preview-0.2.0.zip`
+- `dist/RiderAssetPreview-UE5.8-0.2.0.zip`
 - `dist/release-manifest.json` with SHA-256 hashes and sizes.
 - `dist/updatePlugins.xml` for Rider's custom plugin repository.
 - `dist/Install.ps1` for single-command installation.

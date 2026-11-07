@@ -7,6 +7,7 @@
 #include "Layout/Children.h"
 #include "Materials/MaterialInterface.h"
 #include "Modules/ModuleManager.h"
+#include "Misc/SecureHash.h"
 #include "PropertyEditorModule.h"
 #include "PropertyHandle.h"
 #include "UObject/UnrealType.h"
@@ -36,7 +37,8 @@ namespace
     }
 
     void AddRow(TArray<TSharedPtr<FJsonValue>>& Rows, const FString& Category,
-        const FString& Label, const FString& Value, const FString& PropertyName = FString())
+        const FString& Label, const FString& Value, const FString& PropertyName = FString(),
+        const FString& Key = FString(), const FString& DiffValue = FString(), const FString& Tooltip = FString(), bool bAdvanced = false)
     {
         TSharedRef<FJsonObject> Row = MakeShared<FJsonObject>();
         Row->SetStringField(TEXT("category"), Category.IsEmpty() ? TEXT("General") : Category);
@@ -44,6 +46,11 @@ namespace
         Row->SetStringField(TEXT("value"), Value.Left(4096));
         // Stable transport identity for validation; the UI shows the human-readable name.
         Row->SetStringField(TEXT("property"), PropertyName);
+        Row->SetStringField(TEXT("key"), Key.IsEmpty() ? Category + TEXT("/") + PropertyName + TEXT("/") + Label : Key);
+        Row->SetStringField(TEXT("diffValue"), DiffValue.IsEmpty() ? Value : DiffValue);
+        Row->SetStringField(TEXT("tooltip"), Tooltip.Left(2048));
+        Row->SetBoolField(TEXT("advanced"), bAdvanced);
+        Row->SetBoolField(TEXT("truncated"), Value.Len() > 4096 || DiffValue.Len() > 8192);
         Rows.Add(MakeShared<FJsonValueObject>(Row));
     }
 
@@ -88,7 +95,11 @@ namespace
                 uint32 Count = 0;
                 Handle->GetNumChildren(Count);
                 Value = FString::Printf(TEXT("%u elements"), Count);
-                AddRow(Rows, Category, Label, Value, Property->GetName());
+                FString FullValue;
+                Handle->GetValueAsFormattedString(FullValue);
+                AddRow(Rows, Category, Label, Value, Property->GetName(), Handle->GeneratePathToProperty(), FullValue,
+                    Handle->GetToolTipText().ToString(), Property->HasAnyPropertyFlags(CPF_AdvancedDisplay));
+                if (Count > 32) Rows.Last()->AsObject()->SetBoolField(TEXT("truncated"), true);
                 int32 Exported = 0;
                 for (const TSharedRef<IDetailTreeNode>& Child : Children)
                 {
@@ -97,14 +108,17 @@ namespace
                 }
                 return;
             }
-            AddRow(Rows, Category, Label, Value, Property->GetName());
+            FString DiffValue;
+            Handle->GetValueAsFormattedString(DiffValue);
+            AddRow(Rows, Category, Label, Value, Property->GetName(), Handle->GeneratePathToProperty(), DiffValue,
+                Handle->GetToolTipText().ToString(), Property->HasAnyPropertyFlags(CPF_AdvancedDisplay));
             return;
         }
         for (const TSharedRef<IDetailTreeNode>& Child : Children) AppendNode(Child, Category, bShowAdvanced, Rows, Depth + 1);
     }
 }
 
-TSharedRef<FJsonObject> ExportBlueprintDetails(UObject* Object, bool bShowAdvanced)
+TSharedRef<FJsonObject> ExportBlueprintDetails(UObject* Object, bool bShowAdvanced, const FString& NormalizePackage)
 {
     check(IsInGameThread());
     FPropertyRowGeneratorArgs Args;
@@ -131,13 +145,26 @@ TSharedRef<FJsonObject> ExportBlueprintDetails(UObject* Object, bool bShowAdvanc
             {
                 UMaterialInterface* Material = Mesh->GetMaterial(Index);
                 AddRow(Rows, TEXT("Materials"), FString::Printf(TEXT("Element %d"), Index),
-                    Material ? Material->GetName() : TEXT("None"), TEXT("OverrideMaterials"));
+                    Material ? Material->GetName() : TEXT("None"), TEXT("OverrideMaterials"), FString::Printf(TEXT("OverrideMaterials[%d]"), Index),
+                    Material ? Material->GetPathName() : TEXT("None"), TEXT("The surface material assigned to this mesh slot."));
             }
         }
+    }
+    for (const auto& Value : Rows)
+    {
+        const auto Row = Value->AsObject();
+        FString Canonical = Row->GetStringField(TEXT("diffValue"));
+        if (!NormalizePackage.IsEmpty()) Canonical.ReplaceInline(*NormalizePackage, TEXT("$ASSET"), ESearchCase::CaseSensitive);
+        const FTCHARToUTF8 Bytes(*Canonical);
+        uint8 Digest[FSHA1::DigestSize];
+        FSHA1::HashBuffer(Bytes.Get(), Bytes.Length(), Digest);
+        Row->SetStringField(TEXT("fingerprint"), BytesToHex(Digest, FSHA1::DigestSize));
+        Row->SetStringField(TEXT("diffValue"), Canonical.Left(8192));
     }
     TSharedRef<FJsonObject> Result = MakeShared<FJsonObject>();
     Result->SetStringField(TEXT("source"), TEXT("UnrealDetails"));
     Result->SetBoolField(TEXT("advanced"), bShowAdvanced);
+    Result->SetBoolField(TEXT("truncated"), Rows.Num() >= 500);
     Result->SetArrayField(TEXT("properties"), Rows);
     return Result;
 }

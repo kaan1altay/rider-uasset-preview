@@ -1,6 +1,7 @@
 package dev.kaan.uassetpreview;
 
 import com.google.gson.*;
+
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -10,20 +11,25 @@ import java.util.*;
 /** Transport deliberately independent of IDE APIs, so the real HTTP contract can be tested. */
 final class BridgeClient {
     static final int PROTOCOL = 1;
-    private static final int MAX_JSON = 4 * 1024 * 1024;
+    private static final int MAX_JSON = 16 * 1024 * 1024;
     private static final int MAX_IMAGE = 16 * 1024 * 1024;
     private final URI endpoint;
     private final String token;
 
     BridgeClient(URI endpoint, String token) throws IOException {
-        if (!"http".equals(endpoint.getScheme()) || !"127.0.0.1".equals(endpoint.getHost())
-                || endpoint.getPort() < 1024 || endpoint.getPort() > 65535
-                || endpoint.getRawUserInfo() != null || endpoint.getRawQuery() != null
-                || endpoint.getRawFragment() != null || !"".equals(endpoint.getPath())) {
+        if (!"http".equals(endpoint.getScheme())
+                || !"127.0.0.1".equals(endpoint.getHost())
+                || endpoint.getPort() < 1024
+                || endpoint.getPort() > 65535
+                || endpoint.getRawUserInfo() != null
+                || endpoint.getRawQuery() != null
+                || endpoint.getRawFragment() != null
+                || !"".equals(endpoint.getPath())) {
             throw new IOException("The bridge address must be http://127.0.0.1:<port>.");
         }
         if (token == null || !token.matches("[a-fA-F0-9]{64}"))
-            throw new IOException("Invalid bridge session token. Restart the Unreal Editor bridge.");
+            throw new IOException(
+                    "Invalid bridge session token. Restart the Unreal Editor bridge.");
         this.endpoint = endpoint;
         this.token = token;
     }
@@ -39,7 +45,9 @@ final class BridgeClient {
                 if (Files.isRegularFile(descriptor)) return descriptor;
             }
         }
-        throw new IOException("No Unreal bridge session found. Enable RiderAssetPreview in the open project, then reconnect.");
+        throw new IOException(
+                "No Unreal bridge session found. Enable RiderAssetPreview in the open project, then"
+                    + " reconnect.");
     }
 
     static BridgeClient fromDescriptor(Path path) throws IOException {
@@ -47,8 +55,11 @@ final class BridgeClient {
         try {
             JsonObject data = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
             if (data.get("protocol").getAsInt() != PROTOCOL)
-                throw new IOException("Bridge protocol mismatch. Install matching Rider and Unreal plugins.");
-            return new BridgeClient(URI.create(data.get("endpoint").getAsString()), data.get("token").getAsString());
+                throw new IOException(
+                        "Bridge protocol mismatch. Install matching Rider and Unreal plugins.");
+            return new BridgeClient(
+                    URI.create(data.get("endpoint").getAsString()),
+                    data.get("token").getAsString());
         } catch (IllegalArgumentException | IllegalStateException | NullPointerException e) {
             throw new IOException("Invalid bridge session file.", e);
         }
@@ -59,60 +70,111 @@ final class BridgeClient {
         data.addProperty("filename", asset.toAbsolutePath().toString());
         return json("open", data);
     }
+
+    JsonObject snapshot(Path original, Path snapshot, String requestId) throws IOException {
+        JsonObject data = new JsonObject();
+        data.addProperty("filename", original.toAbsolutePath().toString());
+        data.addProperty("snapshot", snapshot.toAbsolutePath().toString());
+        data.addProperty("request", requestId);
+        return json("snapshot", data);
+    }
+
     JsonObject details(String session, String component) throws IOException {
         return details(session, component, false);
     }
+
     JsonObject details(String session, String component, boolean advanced) throws IOException {
         JsonObject data = session(session);
         data.addProperty("component", component);
         data.addProperty("advanced", advanced);
         return json("details", data);
     }
-    byte[] frame(String session, double yaw, double pitch, double zoom, String focus) throws IOException {
+
+    byte[] frame(String session, double yaw, double pitch, double zoom, String focus)
+            throws IOException {
+        return frame(session, yaw, pitch, zoom, focus, null);
+    }
+
+    byte[] frame(
+            String session, double yaw, double pitch, double zoom, String focus, double[] bounds)
+            throws IOException {
         JsonObject data = session(session);
-        data.addProperty("yaw", yaw); data.addProperty("pitch", pitch); data.addProperty("zoom", zoom);
+        data.addProperty("yaw", yaw);
+        data.addProperty("pitch", pitch);
+        data.addProperty("zoom", zoom);
         data.addProperty("focus", focus);
+        if (bounds != null) {
+            JsonArray values = new JsonArray();
+            for (double value : bounds) values.add(value);
+            data.add("bounds", values);
+        }
         return request("frame", data, MAX_IMAGE);
     }
-    void close(String session) throws IOException { json("close", session(session)); }
-    private static JsonObject session(String session) {
-        JsonObject data = new JsonObject(); data.addProperty("session", session); return data;
+
+    void close(String session) throws IOException {
+        json("close", session(session));
     }
+
+    private static JsonObject session(String session) {
+        JsonObject data = new JsonObject();
+        data.addProperty("session", session);
+        return data;
+    }
+
     private JsonObject json(String route, JsonObject data) throws IOException {
         try {
-            return JsonParser.parseString(new String(request(route, data, MAX_JSON), StandardCharsets.UTF_8)).getAsJsonObject();
+            return JsonParser.parseString(
+                            new String(request(route, data, MAX_JSON), StandardCharsets.UTF_8))
+                    .getAsJsonObject();
         } catch (JsonParseException | IllegalStateException e) {
             throw new IOException("The Unreal bridge returned an invalid response.", e);
         }
     }
+
     private byte[] request(String route, JsonObject data, int limit) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) endpoint.resolve("/rap/v1/" + route).toURL().openConnection(Proxy.NO_PROXY);
-        connection.setConnectTimeout(2000); connection.setReadTimeout(10000);
+        HttpURLConnection connection =
+                (HttpURLConnection)
+                        endpoint.resolve("/rap/v1/" + route).toURL().openConnection(Proxy.NO_PROXY);
+        connection.setConnectTimeout(2000);
+        connection.setReadTimeout(route.equals("snapshot") ? 60000 : 10000);
         connection.setInstanceFollowRedirects(false);
-        connection.setRequestMethod("POST"); connection.setDoOutput(true);
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
         connection.setRequestProperty("Authorization", "Bearer " + token);
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         byte[] body = data.toString().getBytes(StandardCharsets.UTF_8);
         connection.setFixedLengthStreamingMode(body.length);
         try {
-            try (OutputStream output = connection.getOutputStream()) { output.write(body); }
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(body);
+            }
             int code = connection.getResponseCode();
-            InputStream stream = code == 200 ? connection.getInputStream() : connection.getErrorStream();
+            InputStream stream =
+                    code == 200 ? connection.getInputStream() : connection.getErrorStream();
             byte[] bytes;
             try (InputStream input = stream) {
-                bytes = input == null ? new byte[0] : input.readNBytes((code == 200 ? limit : 8192) + 1);
+                bytes =
+                        input == null
+                                ? new byte[0]
+                                : input.readNBytes((code == 200 ? limit : 8192) + 1);
             }
             if (code != 200) {
                 String message = "Unreal bridge returned HTTP " + code + ".";
                 try {
-                    JsonElement error = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
+                    JsonElement error =
+                            JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
                     if (error.isJsonObject() && error.getAsJsonObject().has("error"))
                         message = error.getAsJsonObject().get("error").getAsString();
-                } catch (RuntimeException ignored) { /* Never show arbitrary server HTML in the IDE. */ }
+                } catch (RuntimeException ignored) {
+                    /* Never show arbitrary server HTML in the IDE. */
+                }
                 throw new IOException(message);
             }
-            if (bytes.length > limit) throw new IOException("Unreal bridge response exceeded the size limit.");
+            if (bytes.length > limit)
+                throw new IOException("Unreal bridge response exceeded the size limit.");
             return bytes;
-        } finally { connection.disconnect(); }
+        } finally {
+            connection.disconnect();
+        }
     }
 }

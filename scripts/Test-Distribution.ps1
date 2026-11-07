@@ -20,6 +20,9 @@ $global:rapDistributionFailDestination = ''
 $global:rapDistributionReleaseRoot = $releaseRoot
 $global:rapDistributionManifest = $manifest
 $global:rapDistributionRequests = [Collections.Generic.List[string]]::new()
+$global:rapDistributionEditorActive = $false
+$global:rapDistributionRiderActive = $false
+$global:rapDistributionFakeRider = $fakeRider
 
 function Assert-Distribution([bool]$Condition, [string]$Message) {
     if (!$Condition) { throw $Message }
@@ -40,6 +43,18 @@ function Copy-Item {
         throw 'Injected distribution test copy failure.'
     }
     Microsoft.PowerShell.Management\Copy-Item @PSBoundParameters
+}
+# Process state is simulated only inside these disposable file-install fixtures.
+# Production Install.ps1 still checks real applications when run normally.
+function Get-Process {
+    [CmdletBinding()]
+    param([string[]]$Name)
+    if($global:rapDistributionEditorActive){[pscustomobject]@{ProcessName='UnrealEditor';Id=-1}}
+}
+function Get-CimInstance {
+    [CmdletBinding()]
+    param([string]$ClassName,[string]$Filter)
+    if($global:rapDistributionRiderActive){[pscustomobject]@{ExecutablePath=(Join-Path $global:rapDistributionFakeRider 'bin\rider64.exe')}}
 }
 # Exercise the online code path without publishing a release or contacting GitHub.
 # Only the exact API/asset URLs expected for this fixture are accepted.
@@ -121,9 +136,13 @@ try {
     @{productCode='RD'; buildNumber='253.31033.136'; dataDirectoryName='Rider2025.3'} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $fakeRider 'product-info.json')
 
-    if (@(Get-Process UnrealEditor,UnrealEditor-Cmd,LiveCodingConsole -ErrorAction SilentlyContinue).Count) {
-        throw 'Rider distribution checks passed, but close Unreal/Live Coding to run the Unreal installation and rollback fixtures.'
-    }
+    $global:rapDistributionEditorActive=$true
+    Expect-DistributionFailure { & $installer @installArguments -UnrealOnly } 'Close Unreal Editor'
+    $global:rapDistributionEditorActive=$false
+    Assert-Distribution (!(Test-Path -LiteralPath $unrealTarget)) 'Active Editor guard installed files.'
+    $global:rapDistributionRiderActive=$true
+    Expect-DistributionFailure { & $installer @installArguments -RiderOnly } 'Close Rider'
+    $global:rapDistributionRiderActive=$false
     & $installer @installArguments | Out-Null
     Assert-Distribution (Test-Path -LiteralPath (Join-Path $unrealTarget 'Binaries\Win64\UnrealEditor-RiderAssetPreview.dll')) 'Unreal companion was not installed.'
     $updatedProject = Get-Content -Raw -LiteralPath $project | ConvertFrom-Json
@@ -148,4 +167,5 @@ try {
     $env:LOCALAPPDATA = $originalLocalAppData
     Remove-Variable -Name rapDistributionFailDestination -Scope Global -ErrorAction SilentlyContinue
     Remove-Variable -Name rapDistributionReleaseRoot,rapDistributionManifest,rapDistributionRequests -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name rapDistributionEditorActive,rapDistributionRiderActive,rapDistributionFakeRider -Scope Global -ErrorAction SilentlyContinue
 }

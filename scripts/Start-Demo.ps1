@@ -7,6 +7,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$pluginMetadata = [xml](Get-Content -Raw -LiteralPath (Join-Path $taskRoot 'rider\src\main\resources\META-INF\plugin.xml'))
+$riderArchive = Join-Path $taskRoot ('dist\unreal-asset-preview-' + $pluginMetadata.'idea-plugin'.version + '.zip')
 $sandbox = Join-Path $taskRoot 'build\rider-sandbox'
 $stateFile = Join-Path $taskRoot 'build\demo-state.json'
 if (!$HostProject) {
@@ -33,7 +35,7 @@ if (!(Test-Path -LiteralPath (Join-Path $EngineRoot 'Engine\Binaries\Win64\Unrea
 }
 if (!$HostOnly) {
     if (!(Test-Path -LiteralPath (Join-Path $RiderHome 'bin\rider.bat')) -or
-        !(Test-Path -LiteralPath (Join-Path $taskRoot 'dist\unreal-asset-preview-0.1.0.zip'))) {
+        !(Test-Path -LiteralPath $riderArchive)) {
         throw 'Build the Rider plugin first and check -RiderHome.'
     }
     New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
@@ -104,7 +106,7 @@ try {
     if ($runningSandbox.Count -eq 0) {
         $plugins = Join-Path $sandbox 'plugins'
         New-Item -ItemType Directory -Path $plugins -Force | Out-Null
-        Expand-Archive -LiteralPath (Join-Path $taskRoot 'dist\unreal-asset-preview-0.1.0.zip') -DestinationPath $plugins -Force
+        Expand-Archive -LiteralPath $riderArchive -DestinationPath $plugins -Force
         $ui = Join-Path $hostRoot 'Saved\RiderUi'
         $bat = Join-Path $RiderHome 'bin\rider.bat'
         $arguments = '/d /c ""' + $bat + '" "' + $ui + '""'

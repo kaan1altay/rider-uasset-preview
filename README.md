@@ -1,10 +1,10 @@
 # Rider UAsset Viewer
 
-Read-only Unreal Engine asset previews inside JetBrains Rider: a 3D viewport, a clickable component hierarchy, and properties from Unreal's Details system.
+Understand Unreal assets and their changes inside JetBrains Rider: linked before/after viewports, component and setting differences, Blueprint logic changes, and readable explanations.
 
 This is an early prototype with two plugins: a Java plugin for Rider and a companion C++ editor plugin for Unreal Engine. **The Unreal project must be open in Unreal Editor.** Standalone `.uasset` parsing is not supported.
 
-![Blueprint component hierarchy, 3D preview and Details in Rider](docs/screenshots/rider-blueprint-preview.jpg)
+![Native Rider Commit review with linked before/after viewports, component changes and readable explanations](docs/screenshots/rider-asset-review.jpg)
 
 ## Features
 
@@ -14,6 +14,11 @@ This is an early prototype with two plugins: a Java plugin for Rider and a compa
 - **Texture2D:** image preview, up to 2048 pixels, and asset properties.
 - **Viewport controls:** drag to orbit, scroll to zoom, and use **Frame selected** or **Frame asset** to focus the camera.
 - **Details:** editor-visible properties with Unreal display names. Advanced properties are hidden by default and can be enabled with **Advanced**.
+- **Native Git/Commit diffs:** compare the actual before and after asset bytes, including added and deleted assets. Blueprint components are matched using their persistent IDs where available.
+- **Visual review:** linked cameras use shared bounds so size/position changes stay visible. Switch between side by side, a wipe, before, after and a pixel-difference view.
+- **Readable change lists:** find a component or setting, filter to changes, read the setting's meaning and copy a review to the clipboard.
+- **Blueprint logic:** compare node defaults, serialized node settings and pin connections. Layout and node comments are excluded.
+- **Other asset classes:** inspect editor-visible settings even when the asset has no 3D geometry.
 
 ![Static mesh preview and component properties](docs/screenshots/rider-mesh-preview.jpg)
 
@@ -37,7 +42,7 @@ pwsh
 .\scripts\Build-Rider.ps1 -Test
 ```
 
-This compiles the Rider plugin and runs its HTTP transport checks. It produces `dist/unreal-asset-preview-0.1.0.zip`. Rider libraries are used from your local installation and are not bundled with the plugin. No Gradle or additional JDK download is required.
+This compiles the Rider plugin and runs its HTTP transport checks. It produces `dist/unreal-asset-preview-0.2.0.zip`. Rider libraries are used from your local installation and are not bundled with the plugin. No Gradle or additional JDK download is required.
 
 If Rider is installed elsewhere, pass its installation directory:
 
@@ -52,6 +57,22 @@ Save your work and close Unreal Editor and Live Coding before building the Unrea
 ```
 
 The script creates an isolated project under `build/` and prints the compiled plugin directory under `dist/`. It stops with exit code `20` if an Editor or Live Coding process is running. It never closes your existing sessions or modifies your Unreal project.
+
+For an existing isolated host, `-AllowOtherProjects -HostProject '...AssetPreviewHost.uproject'` permits work alongside another project after checking the host's location, project descriptor, process command lines and loaded Editor DLL paths. The host itself must be closed. Builds still use `-NoEngineChanges` and `-NoHotReloadFromIDE`; unverifiable isolation stops the operation.
+
+## Read an asset diff
+
+1. Open a two-way `.uasset` diff from Rider's **Commit** or **Git History** view. If needed, choose **Unreal asset review** in the diff viewer selector.
+2. Read the summary, then select **All changes**, an individual component, or **Blueprint logic** in the change navigator.
+3. Compare the linked viewports. Drag to orbit and scroll to zoom. In **Wipe**, use the slider or **Shift + drag** to move the boundary.
+4. Select a changed setting to see **Before**, **After** and **What this means**. Search accepts component names, settings and values. **F7** moves to the next displayed row; **Ctrl + F** focuses search.
+5. Use **Copy review** to share a text summary. The viewer never applies changes or saves assets.
+
+A Blueprint is a reusable class. A component is one of its parts, such as a camera, collision shape or mesh. A mesh provides the shape; a material provides its surface appearance. A parent class supplies inherited behavior and defaults, while an attachment parent controls how a component follows another component's transform.
+
+**Review scope matters.** Historical assets are loaded separately using Unreal's revision loader, but dependencies and native classes come from the currently open project. This is not a checkout of the whole historical project. Settings comparisons cover editor-visible saved defaults and the exported Blueprint node data, not every binary field. A pixel mask is a visual aid, not a semantic geometry comparison. Long values use full normalized fingerprints, with a bounded readable preview; limits are shown in the review. See [review architecture and coverage](docs/ASSET_REVIEW.md).
+
+Git LFS pointers are resolved only from verified local LFS objects. If the historical object is missing, the viewer tells you to fetch it; it never substitutes the current working asset for the missing revision. Assets larger than 128 MB and three-way merge/conflict resolution are outside this release's review support.
 
 ## Install from a GitHub Release
 
@@ -75,7 +96,7 @@ After downloading the installer, you can also use:
 # Inspect and validate a release without installing it.
 & "$env:TEMP\Install-RiderUAssetViewer.ps1" -Project 'D:\Games\MyGame\MyGame.uproject' -WhatIf
 # Install only one companion, or pin a release.
-& "$env:TEMP\Install-RiderUAssetViewer.ps1" -RiderOnly -Version '0.1.0'
+& "$env:TEMP\Install-RiderUAssetViewer.ps1" -RiderOnly -Version '0.2.0'
 & "$env:TEMP\Install-RiderUAssetViewer.ps1" -UnrealOnly -Project 'D:\Games\MyGame\MyGame.uproject'
 ```
 
@@ -103,7 +124,7 @@ With Rider closed, the Rider plugin can also be installed using its [command-lin
 
 1. Copy the compiled Unreal plugin directory printed by the build script to `<YourProject>/Plugins/RiderAssetPreview/`. `RiderAssetPreview.uplugin` must be directly inside that directory.
 2. Open the project in Unreal Editor. Enable **Edit → Plugins → Rider Asset Preview** and restart the Editor if requested.
-3. In Rider, use **Settings → Plugins → gear menu → Install Plugin from Disk** and select `dist/unreal-asset-preview-0.1.0.zip`. Restart Rider if requested.
+3. In Rider, use **Settings → Plugins → gear menu → Install Plugin from Disk** and select `dist/unreal-asset-preview-0.2.0.zip`. Restart Rider if requested.
 4. Open the same project in Rider and Unreal Editor. Check the Unreal Output Log for `Asset preview bridge ready`.
 5. Open a supported `.uasset` file in Rider. Select components in the tree to inspect their properties.
 
@@ -123,7 +144,7 @@ The viewport requests 960 × 640 PNG frames when the camera changes. Requests ar
 
 - Blueprint previews use component template defaults. Construction Script, BeginPlay, PIE and physics simulation are not executed. Runtime changes and components generated by Construction Script are not represented.
 - Child Actor components can be inspected, but their child actors are not spawned.
-- Skeletal animation playback, Blueprint node graphs, maps (`.umap`), asset editing and saving are not supported.
+- Skeletal animation playback, a full Blueprint graph editor, maps (`.umap`), asset editing and saving are not supported. Blueprint logic changes are available as a read-only review list.
 - Selection is through the component tree; clicking geometry in the viewport does not select it.
 - Complex inherited/native component override combinations and project-specific custom components need further testing. Visual parity with the full Blueprint Editor is not guaranteed.
 - Texture2D and skeletal mesh previews have passed Unreal HTTP/render tests; separate interactive Rider checks for these two asset types remain outstanding.
