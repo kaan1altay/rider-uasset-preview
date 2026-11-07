@@ -1,32 +1,53 @@
-# Prerequisites
-*.d
+# Generated builds, release archives and isolated test projects
+/build/
+/dist/
 
-# Compiled Object files
-*.slo
-*.lo
+# Unreal output (Saved also contains bridge session credentials)
+**/Binaries/
+**/Intermediate/
+**/Saved/
+**/DerivedDataCache/
+
+# IDE and local tooling configuration
+.idea/
+.vs/
+.vscode/
+*.sln
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+.mcp.json
+
+# Local credentials and connection descriptors
+.env
+.env.*
+!.env.example
+**/RiderAssetPreview/session.json
+*.local.json
+
+# Compiler, debugging and runtime output
+*.class
+*.jar
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
 *.pch
-
-# Compiled Dynamic libraries
+*.gch
+*.dll
+*.exe
+*.lib
+*.a
 *.so
 *.dylib
-*.dll
+*.pdb
+*.ilk
+*.exp
+*.log
+*.dmp
+*.hprof
+hs_err_pid*
 
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini

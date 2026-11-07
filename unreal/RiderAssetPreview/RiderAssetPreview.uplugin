@@ -1,0 +1,14 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "Rider Asset Preview",
+  "Description": "Read-only asset previews for the companion Rider plugin.",
+  "Category": "Editor",
+  "CreatedBy": "Kaan",
+  "CanContainContent": false,
+  "EnabledByDefault": false,
+  "Modules": [
+    { "Name": "RiderAssetPreview", "Type": "Editor", "LoadingPhase": "PostEngineInit" }
+  ]
+}

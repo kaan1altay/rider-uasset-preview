@@ -1,2 +1,12 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalize source files across Windows and Unix checkouts.
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.java text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.cs text eol=lf
+*.uplugin text eol=lf
+*.md text eol=lf
+*.jpg binary
+*.png binary
+*.zip binary
