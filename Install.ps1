@@ -128,8 +128,17 @@ try {
         $manifest.repository -ne $Repository -or $manifest.version -notmatch '^\d+\.\d+\.\d+$') { throw 'Unsupported release manifest.' }
     if (!$ReleaseDirectory -and $manifest.version -ne $releaseVersion) { throw 'Release tag and manifest versions differ.' }
     if ($Version -ne 'latest' -and $manifest.version -ne $Version.TrimStart('v')) { throw 'Requested version differs from manifest.' }
-    if ($installRider -and ($manifest.riderSinceBuild -ne '253' -or $manifest.riderUntilBuild -ne '253.*' -or
-        $product.buildNumber -notmatch '^253\.')) { throw 'This release requires Rider 2025.3 (build 253).' }
+    if ($installRider) {
+        $minimumBuild = [string]$manifest.riderSinceBuild
+        $maximumBuild = [string]$manifest.riderUntilBuild
+        if ($minimumBuild -notmatch '^\d{3}$' -or $maximumBuild -notmatch '^\d{3}\.\*$' -or
+            [int]$minimumBuild -gt [int]$maximumBuild.Split('.')[0]) { throw 'Invalid Rider compatibility range in release manifest.' }
+        $branch = ([string]$product.buildNumber).Split('.')[0]
+        if ($branch -notmatch '^\d{3}$' -or [int]$branch -lt [int]$minimumBuild -or
+            [int]$branch -gt [int]$maximumBuild.Split('.')[0]) {
+            throw "Rider build $($product.buildNumber) is outside this release range $minimumBuild to $maximumBuild."
+        }
+    }
     if ($installUnreal) {
         $installedEngine = "$($engineVersion.MajorVersion).$($engineVersion.MinorVersion).$($engineVersion.PatchVersion)"
         if ($manifest.unreal -ne $installedEngine -or $manifest.unrealBuildId -ne $engineModules.BuildId) {
@@ -159,6 +168,8 @@ try {
                 $reader = [IO.StreamReader]::new($jar.GetEntry('META-INF/plugin.xml').Open())
                 try { $plugin = [xml]$reader.ReadToEnd() } finally { $reader.Dispose() }
                 if ($plugin.'idea-plugin'.id -ne $manifest.pluginId -or $plugin.'idea-plugin'.version -ne $manifest.version) { throw 'Rider archive identity/version mismatch.' }
+                if ($plugin.'idea-plugin'.'idea-version'.'since-build' -ne $manifest.riderSinceBuild -or
+                    $plugin.'idea-plugin'.'idea-version'.'until-build' -ne $manifest.riderUntilBuild) { throw 'Rider archive compatibility range differs from manifest.' }
             } finally { $jar.Dispose() }
             $target = $riderTarget
         } else {

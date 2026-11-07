@@ -260,10 +260,14 @@ public final class InspectionTest {
                     "not a readable Unreal");
             expectFailure(() -> RevisionBytes.resolve(new byte[0], temp), "not a readable Unreal");
         } finally {
+            List<Path> cleanup;
             try (var paths = Files.walk(temp)) {
-                for (Path path : paths.sorted(Comparator.reverseOrder()).toList())
-                    Files.delete(path);
+                cleanup =
+                        paths.sorted(Comparator.comparingInt(Path::getNameCount).reversed())
+                                .toList();
             }
+            // Release directory enumeration handles before deleting on Windows/JBR 25.
+            for (Path path : cleanup) Files.delete(path);
         }
         if (args.length == 2) {
             Inspection.Snapshot nativeBefore =

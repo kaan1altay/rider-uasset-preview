@@ -132,9 +132,28 @@ try {
     Assert-Distribution (!(Test-Path -LiteralPath (Join-Path $fixtureRoot 'escaped.txt'))) 'Unsafe archive wrote outside staging.'
     @{productCode='RD'; buildNumber='252.1'; dataDirectoryName='Rider2025.2'} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $fakeRider 'product-info.json')
-    Expect-DistributionFailure { & $installer @installArguments -RiderOnly } 'requires Rider 2025.3'
+    Expect-DistributionFailure { & $installer @installArguments -RiderOnly } 'outside this release range'
+    foreach($futureBuild in @('263.1','999.1')) {
+        @{productCode='RD'; buildNumber=$futureBuild; dataDirectoryName='RiderFuture'} | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $fakeRider 'product-info.json')
+        Expect-DistributionFailure { & $installer @installArguments -RiderOnly } 'outside this release range'
+    }
+    foreach($supportedBuild in @('261.1','262.11879.119')) {
+        @{productCode='RD'; buildNumber=$supportedBuild; dataDirectoryName='Rider2026.2'} | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $fakeRider 'product-info.json')
+        & $installer @installArguments -RiderOnly | Out-Null
+        Assert-Distribution (Test-Path -LiteralPath (Join-Path $riderTarget 'lib\unreal-asset-preview.jar')) "Supported build $supportedBuild was rejected."
+    }
     @{productCode='RD'; buildNumber='253.31033.136'; dataDirectoryName='Rider2025.3'} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $fakeRider 'product-info.json')
+
+    $badManifest = Get-Content -Raw -LiteralPath (Join-Path $releaseRoot 'release-manifest.json') | ConvertFrom-Json
+    $badManifest.riderSinceBuild = 'invalid'
+    $badManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $badRelease 'release-manifest.json')
+    Expect-DistributionFailure { & $installer @badArguments -RiderOnly } 'Invalid Rider compatibility range'
+    $badManifest.riderSinceBuild = '252'
+    $badManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $badRelease 'release-manifest.json')
+    Expect-DistributionFailure { & $installer @badArguments -RiderOnly } 'archive compatibility range differs'
 
     $global:rapDistributionEditorActive=$true
     Expect-DistributionFailure { & $installer @installArguments -UnrealOnly } 'Close Unreal Editor'

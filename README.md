@@ -27,11 +27,11 @@ This is an early prototype with two plugins: a Java plugin for Rider and a compa
 The prototype has been built and tested with:
 
 - Windows x64.
-- JetBrains Rider **2025.3.3**, build **253.31033.136**, with its bundled Java 21 compiler.
+- JetBrains Rider **2025.3.5.3** and **2026.2.4.1**, with the bundled compiler. Release binaries use Java 21 bytecode.
 - Unreal Engine **5.8.4**, with a working Windows C++ build toolchain.
 - PowerShell **7** (`pwsh`). The build scripts use APIs unavailable in Windows PowerShell 5.1.
 
-The Rider plugin currently targets build **253** only. Other Rider versions, Unreal versions and operating systems have not been validated.
+The Rider plugin declares build **253 through 262.*** compatibility (Rider 2025.3–2026.2). See [compatibility and IDE upgrades](docs/COMPATIBILITY.md) for verified builds and upgrade instructions. Other Unreal versions and operating systems have not been validated.
 
 ## Build from source
 
@@ -42,7 +42,7 @@ pwsh
 .\scripts\Build-Rider.ps1 -Test
 ```
 
-This compiles the Rider plugin and runs its HTTP transport checks. It produces `dist/unreal-asset-preview-0.2.0.zip`. Rider libraries are used from your local installation and are not bundled with the plugin. No Gradle or additional JDK download is required.
+This compiles the Rider plugin and runs its HTTP transport checks. It produces `dist/unreal-asset-preview-0.2.1.zip`. Rider libraries are used from your local installation and are not bundled with the plugin. No Gradle or additional JDK download is required. Build release binaries against the oldest supported Rider installation, then verify the same ZIP against newer IDE builds.
 
 If Rider is installed elsewhere, pass its installation directory:
 
@@ -88,7 +88,7 @@ Invoke-WebRequest 'https://github.com/kaan1altay/rider-uasset-preview/releases/l
 
 The installer downloads a published release, verifies ZIP sizes and SHA-256 hashes, installs the Rider plugin and the Unreal companion, and enables the companion in the chosen `.uproject`. It never closes applications for you. Existing plugin directories and the original project descriptor are backed up under `%LOCALAPPDATA%/RiderUAssetViewer/Backups/`; failed installs restore the previous directories. The original project descriptor is restored on rollback.
 
-The default Rider location is `%LOCALAPPDATA%/Programs/Rider`, using its standard `%APPDATA%/JetBrains/Rider2025.3/plugins` profile. For Toolbox, another installation or a custom profile, pass `-RiderHome` and, if necessary, `-RiderPluginsDirectory`. Pass `-EngineRoot` for another Unreal installation. The prebuilt companion requires the exact Unreal version **and build ID** recorded in the release; otherwise build from source.
+The default Rider location is `%LOCALAPPDATA%/Programs/Rider`. The standard plugin profile is derived from that installation’s `product-info.json`, for example `%APPDATA%/JetBrains/Rider2026.2/plugins`. For Toolbox, another installation or a custom profile, pass `-RiderHome` and, if necessary, `-RiderPluginsDirectory`. Pass `-EngineRoot` for another Unreal installation. The prebuilt companion requires the exact Unreal version **and build ID** recorded in the release; otherwise build from source.
 
 After downloading the installer, you can also use:
 
@@ -96,7 +96,7 @@ After downloading the installer, you can also use:
 # Inspect and validate a release without installing it.
 & "$env:TEMP\Install-RiderUAssetViewer.ps1" -Project 'D:\Games\MyGame\MyGame.uproject' -WhatIf
 # Install only one companion, or pin a release.
-& "$env:TEMP\Install-RiderUAssetViewer.ps1" -RiderOnly -Version '0.2.0'
+& "$env:TEMP\Install-RiderUAssetViewer.ps1" -RiderOnly -Version '0.2.1'
 & "$env:TEMP\Install-RiderUAssetViewer.ps1" -UnrealOnly -Project 'D:\Games\MyGame\MyGame.uproject'
 ```
 
@@ -124,7 +124,7 @@ With Rider closed, the Rider plugin can also be installed using its [command-lin
 
 1. Copy the compiled Unreal plugin directory printed by the build script to `<YourProject>/Plugins/RiderAssetPreview/`. `RiderAssetPreview.uplugin` must be directly inside that directory.
 2. Open the project in Unreal Editor. Enable **Edit → Plugins → Rider Asset Preview** and restart the Editor if requested.
-3. In Rider, use **Settings → Plugins → gear menu → Install Plugin from Disk** and select `dist/unreal-asset-preview-0.2.0.zip`. Restart Rider if requested.
+3. In Rider, use **Settings → Plugins → gear menu → Install Plugin from Disk** and select `dist/unreal-asset-preview-0.2.1.zip`. Restart Rider if requested.
 4. Open the same project in Rider and Unreal Editor. Check the Unreal Output Log for `Asset preview bridge ready`.
 5. Open a supported `.uasset` file in Rider. Select components in the tree to inspect their properties.
 
